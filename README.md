@@ -516,7 +516,7 @@ codegraph sync [path]             # Incremental update
 codegraph status [path]           # Show statistics
 codegraph unlock [path]           # Remove a stale lock file that's blocking indexing
 codegraph query <search>          # Search symbols (--kind, --limit, --json)
-codegraph explore <query>         # Relevant symbols' source + call paths in one shot (same output as the codegraph_explore MCP tool)
+codegraph explore <query>         # Relevant symbols' source + call paths in one shot (--target scopes to a build.toml target)
 codegraph node <symbol|file>      # One symbol's source + callers, or read a file with line numbers (same output as codegraph_node)
 codegraph files [path]            # Show file structure (--format, --filter, --max-depth, --json)
 codegraph packages [path]         # Show build.toml targets and dependencies (--json)
@@ -533,8 +533,9 @@ codegraph help [command]          # Show help, optionally for one command
 
 For build.toml-style monorepos, `codegraph index` discovers `[project]` and `[lib]` targets, stores their
 core/dependency metadata in the same SQLite index, and associates indexed files with the longest matching target
-path. Use `codegraph packages` to refresh and inspect that catalog. Search and explore scoping are reserved for a
-later filter layer.
+path. Use `codegraph packages` to refresh and inspect that catalog. Scope a query to one target's directly associated
+files with `codegraph explore "SharedThing" --target rt/ui`. Target dependencies are metadata only: `--target` does
+not expand the result set to declared dependencies, and existing unscoped search/explore calls are unchanged.
 
 ### `codegraph affected`
 

@@ -435,6 +435,9 @@ export interface TraversalOptions {
 
   /** Whether to include the starting node */
   includeStart?: boolean;
+
+  /** Restrict traversal to nodes whose files belong to this set */
+  filePaths?: readonly string[];
 }
 
 /**
@@ -461,6 +464,9 @@ export interface SearchOptions {
 
   /** Whether search is case-sensitive */
   caseSensitive?: boolean;
+
+  /** Restrict search to files directly associated with this monorepo target */
+  targetPath?: string;
 }
 
 /**
@@ -641,6 +647,9 @@ export interface BuildContextOptions {
 
   /** Minimum semantic similarity score (default: 0.3) */
   minScore?: number;
+
+  /** Restrict context to files directly associated with this monorepo target */
+  targetPath?: string;
 }
 
 /**
@@ -710,4 +719,7 @@ export interface FindRelevantContextOptions {
    * SEGMENTS the query's words name are seeded here instead.
    */
   seedNames?: string[];
+
+  /** Restrict context to files directly associated with this monorepo target */
+  targetPath?: string;
 }

@@ -575,6 +575,23 @@ describe('Traversal edge-completeness & limits (#1086–#1090)', () => {
     expect(sub.nodes.size).toBeLessThanOrEqual(2);
   });
 
+  it('traverseBFS and traverseDFS reject a start node outside file scope', () => {
+    const start = tNode('outside');
+    start.filePath = 'pkg-b/b.ts';
+    const inside = tNode('inside');
+    inside.filePath = 'pkg-a/a.ts';
+    const edges: Edge[] = [{ source: 'outside', target: 'inside', kind: 'calls' }];
+    const options = { direction: 'outgoing' as const, filePaths: ['pkg-a/a.ts'] };
+
+    const bfs = tGraph([start, inside], edges).traverseBFS('outside', options);
+    expect([...bfs.nodes.values()]).toEqual([]);
+    expect(bfs.roots).toEqual([]);
+
+    const dfs = tGraph([start, inside], edges).traverseDFS('outside', options);
+    expect([...dfs.nodes.values()]).toEqual([]);
+    expect(dfs.roots).toEqual([]);
+  });
+
   it('getCallers returns each caller once when reached via multiple edges (#1086)', () => {
     // Y calls X at two sites and also references it — three incoming edges.
     const edges: Edge[] = [

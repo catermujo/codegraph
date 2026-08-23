@@ -1191,6 +1191,10 @@ export const tools: ToolDefinition[] = [
           description: 'Maximum number of files to include source code from (default: 12)',
           default: 12,
         },
+        target: {
+          type: 'string',
+          description: 'Restrict results to a relative build.toml target path; only files directly associated with that target are included (declared deps are not expanded).',
+        },
         projectPath: projectPathProperty,
       },
       required: ['query'],
@@ -2512,13 +2516,14 @@ export class ToolHandler {
    * whose qualifiedName contains another named token (`PmsProductServiceImpl::list`),
    * dropping unrelated `OmsOrderService::list`.
    */
-  private buildFlowFromNamedSymbols(cg: CodeGraph, query: string): { text: string; pathNodeIds: Set<string>; namedNodeIds: Set<string>; uniqueNamedNodeIds: Set<string>; spineCallSites: Map<string, number> } {
+  private buildFlowFromNamedSymbols(cg: CodeGraph, query: string, targetFiles?: ReadonlySet<string>): { text: string; pathNodeIds: Set<string>; namedNodeIds: Set<string>; uniqueNamedNodeIds: Set<string>; spineCallSites: Map<string, number> } {
     // spineCallSites: for each spine node, the line where it CALLS the next hop —
     // lets the source assembler window an oversize spine method (e.g. n8n's 962-line
     // processRunExecutionData) to the call site instead of dumping the whole body.
     const EMPTY = { text: '', pathNodeIds: new Set<string>(), namedNodeIds: new Set<string>(), uniqueNamedNodeIds: new Set<string>(), spineCallSites: new Map<string, number>() };
     try {
       const CALLABLE = new Set(['method', 'function', 'component', 'constructor']);
+      const isInTarget = (node: Node): boolean => targetFiles === undefined || targetFiles.has(node.filePath);
       // Strip only a REAL file extension (Create.cs → Create); KEEP qualified
       // names (Class.method / Class::method) — the agent's most precise input,
       // resolved exactly by findAllSymbols. (The old strip mangled Class.method
@@ -2570,7 +2575,7 @@ export class ToolHandler {
       const hasHeuristicEdge = (id: string): boolean =>
         [...cg.getCallers(id), ...cg.getCallees(id)].some(({ edge }) => edge.provenance === 'heuristic');
       for (const t of tokens) {
-        const hits = this.findAllSymbols(cg, t).nodes;
+        const hits = this.findAllSymbols(cg, t).nodes.filter(isInTarget);
         const cands = hits.filter((n) => CALLABLE.has(n.kind));
         tokenFamily.set(t, cands);
         // A qualified or otherwise-specific name (<=3 hits) keeps all; an
@@ -2621,7 +2626,7 @@ export class ToolHandler {
           if (synthLines.length >= 6) break;
           for (const { node: other, edge } of [...cg.getCallers(n.id), ...cg.getCallees(n.id)]) {
             if (synthLines.length >= 6) break;
-            if (edge.provenance !== 'heuristic' || other.id === n.id) continue;
+            if (edge.provenance !== 'heuristic' || other.id === n.id || !isInTarget(other)) continue;
             if (skipInChain && skipInChain(edge)) continue;
             const src = edge.source === n.id ? n : other;
             const tgt = edge.source === n.id ? other : n;
@@ -2670,7 +2675,7 @@ export class ToolHandler {
         // whole chain; (2) the one resolved callable's body may hold the
         // dynamic-dispatch site that EXPLAINS a half-connected flow.
         const synthLines = collectSynthLinks(null);
-        const boundaries = named.size === 0 ? '' : (this.buildDynamicBoundaries(cg, [...named.values()], named) || '');
+        const boundaries = named.size === 0 ? '' : (this.buildDynamicBoundaries(cg, [...named.values()], named, targetFiles) || '');
         if (synthLines.length === 0 && !boundaries) return identityOnly();
         const out: string[] = [];
         if (synthLines.length) out.push(
@@ -2698,7 +2703,7 @@ export class ToolHandler {
           if (id !== seed.id && named.has(id) && depth > deepDepth) { deep = id; deepDepth = depth; }
           if (depth >= MAX_HOPS - 1) continue;
           for (const c of cg.getCallees(id)) {
-            if (c.edge.kind !== 'calls' || parent.has(c.node.id)) continue;
+            if (c.edge.kind !== 'calls' || parent.has(c.node.id) || !isInTarget(c.node)) continue;
             const newStreak = named.has(c.node.id) ? 0 : streak + 1;
             if (newStreak > MAX_BRIDGE) continue;
             parent.set(c.node.id, { prev: id, edge: c.edge, node: c.node });
@@ -2749,7 +2754,7 @@ export class ToolHandler {
           if (hasMain) scanList.push(best![best!.length - 1]!.node);
           scanList.push(...uncovered.sort((a, b) =>
             (uniqueNamedNodeIds.has(b.id) ? 1 : 0) - (uniqueNamedNodeIds.has(a.id) ? 1 : 0)));
-          boundaryText = this.buildDynamicBoundaries(cg, scanList, named);
+          boundaryText = this.buildDynamicBoundaries(cg, scanList, named, targetFiles);
         }
       }
 
@@ -2772,7 +2777,7 @@ export class ToolHandler {
           if (ids.some((id) => pathIds.has(id))) continue; // covered by the flow — silent
           polyCands.push({ token: t, family: fam });
         }
-        if (polyCands.length) polyText = this.buildPolymorphicBoundaries(cg, polyCands, named);
+        if (polyCands.length) polyText = this.buildPolymorphicBoundaries(cg, polyCands, named, targetFiles);
       }
 
       // Supplementary: dynamic-dispatch (synthesized) edges incident to a named
@@ -2831,7 +2836,7 @@ export class ToolHandler {
    * at runtime. Query-time, deterministic, zero graph mutation; a fully
    * connected flow never reaches this method.
    */
-  private buildDynamicBoundaries(cg: CodeGraph, scanList: Node[], named: Map<string, Node>): string {
+  private buildDynamicBoundaries(cg: CodeGraph, scanList: Node[], named: Map<string, Node>, targetFiles?: ReadonlySet<string>): string {
     const MAX_NOTES = 4;       // boundary bullets per explore
     const MAX_SCAN = 8;        // bodies scanned
     const MAX_TOTAL_CHARS = 200_000;
@@ -2860,7 +2865,7 @@ export class ToolHandler {
         const more = m.moreSites ? ` (+${m.moreSites} more such site${m.moreSites > 1 ? 's' : ''} in this body)` : '';
         notes.push(`- \`${node.name}\` (${node.filePath}:${m.line}) — ${m.label}: \`${m.snippet}\`${more}`);
         if (m.key) {
-          const cand = this.boundaryCandidates(cg, m.key, !!m.keyIsType, named, node.id);
+          const cand = this.boundaryCandidates(cg, m.key, !!m.keyIsType, named, node.id, targetFiles);
           if (cand) notes.push(`  ${cand}`);
         }
       }
@@ -2895,7 +2900,7 @@ export class ToolHandler {
    * 611 implementers vs a handful). So candidate supertypes are ranked by their
    * TRUE graph-wide implementer count, NOT their frequency in the sample.
    */
-  private buildPolymorphicBoundaries(cg: CodeGraph, candidates: Array<{ token: string; family: Node[] }>, named: Map<string, Node>): string {
+  private buildPolymorphicBoundaries(cg: CodeGraph, candidates: Array<{ token: string; family: Node[] }>, named: Map<string, Node>, targetFiles?: ReadonlySet<string>): string {
     const CLASSY = new Set(['class', 'struct', 'interface', 'trait', 'protocol', 'abstract']);
     const MIN_IMPL = 8;     // a supertype needs >= this many implementers to count as "polymorphic"
     const MIN_SUPPORT = 2;  // >= this many sampled definers must share the supertype (ties it to the token)
@@ -2912,7 +2917,7 @@ export class ToolHandler {
       if (notes.length >= MAX_NOTES) break;
       // supertype id → how many sampled definers share it + a few example definers
       const supers = new Map<string, { node: Node; count: number; targets: Node[] }>();
-      for (const m of family.slice(0, SAMPLE)) {
+      for (const m of family.filter((node) => targetFiles === undefined || targetFiles.has(node.filePath)).slice(0, SAMPLE)) {
         const container = containerOf(m);
         if (!container || !CLASSY.has(container.kind)) continue;
         let sups: Node[] = [];
@@ -2923,6 +2928,7 @@ export class ToolHandler {
             .filter((n): n is Node => !!n && CLASSY.has(n.kind) && (n.name?.length || 0) >= 3);
         } catch { /* no supertypes — free function or unresolved */ }
         for (const s of sups) {
+          if (targetFiles !== undefined && !targetFiles.has(s.filePath)) continue;
           const e = supers.get(s.id) || { node: s, count: 0, targets: [] };
           e.count++;
           if (e.targets.length < 6) e.targets.push(m);
@@ -2935,7 +2941,17 @@ export class ToolHandler {
       for (const { node, count, targets } of supers.values()) {
         if (count < MIN_SUPPORT) continue;
         let impl = 0;
-        try { impl = cg.getIncomingEdges(node.id).filter((e) => e.kind === 'implements' || e.kind === 'extends').length; }
+        try {
+          impl = cg.getIncomingEdges(node.id)
+            .filter((e) => e.kind === 'implements' || e.kind === 'extends')
+            .filter((e) => {
+              if (targetFiles === undefined) return true;
+              try {
+                const source = cg.getNode(e.source);
+                return source !== null && targetFiles.has(source.filePath);
+              } catch { return false; }
+            }).length;
+        }
         catch { /* leave 0 — gated out below */ }
         if (impl < MIN_IMPL) continue;
         if (!best || impl > best.impl) best = { node, impl, targets };
@@ -2971,14 +2987,14 @@ export class ToolHandler {
    * candidate list should be). Symbols the agent already named sort first and
    * are marked — that's the "you were right, here's the wiring" case.
    */
-  private boundaryCandidates(cg: CodeGraph, key: string, keyIsType: boolean, named: Map<string, Node>, selfId: string): string {
+  private boundaryCandidates(cg: CodeGraph, key: string, keyIsType: boolean, named: Map<string, Node>, selfId: string, targetFiles?: ReadonlySet<string>): string {
     const CALLABLE = new Set(['method', 'function', 'component', 'constructor', 'class']);
     const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
     const keyNorm = norm(key);
     if (keyNorm.length < 3) return '';
     const cands = new Map<string, Node>();
     const consider = (n: Node | undefined | null) => {
-      if (!n || n.id === selfId || !CALLABLE.has(n.kind) || cands.has(n.id)) return;
+      if (!n || n.id === selfId || (targetFiles !== undefined && !targetFiles.has(n.filePath)) || !CALLABLE.has(n.kind) || cands.has(n.id)) return;
       const nameNorm = norm(n.name || '');
       if (nameNorm.length < 3) return;
       if (!nameNorm.includes(keyNorm) && !keyNorm.includes(nameNorm)) return;
@@ -3038,7 +3054,7 @@ export class ToolHandler {
    * that have no dependents (nothing to warn about), and returns '' when none
    * qualify so a leaf-only exploration stays clean.
    */
-  private buildBlastRadiusSection(cg: CodeGraph, subgraph: Subgraph): string {
+  private buildBlastRadiusSection(cg: CodeGraph, subgraph: Subgraph, targetFiles?: ReadonlySet<string>): string {
     const ROOT_CAP = 5; // only the symbols the query actually targeted
     const FILE_CAP = 4; // caller files listed per symbol before "+N more"
     const MEANINGFUL = new Set<string>([
@@ -3056,7 +3072,10 @@ export class ToolHandler {
     const entries: string[] = [];
     for (const root of roots) {
       let callers: Array<{ node: Node }> = [];
-      try { callers = cg.getCallers(root.id) as Array<{ node: Node }>; } catch { /* skip this root */ }
+      try {
+        callers = (cg.getCallers(root.id) as Array<{ node: Node }>)
+          .filter((caller) => targetFiles === undefined || targetFiles.has(caller.node.filePath));
+      } catch { /* skip this root */ }
 
       const seen = new Set<string>();
       const uniq: Node[] = [];
@@ -3074,7 +3093,7 @@ export class ToolHandler {
       const where = nonTest.length > 0 ? ` in ${shown}${more}` : '';
       const tests = testFiles.length > 0
         ? `; tests: ${testFiles.slice(0, FILE_CAP).map((f) => `\`${f}\``).join(', ')}${testFiles.length > FILE_CAP ? ` +${testFiles.length - FILE_CAP}` : ''}`
-        : this.indirectTestNote(cg, uniq, rel);
+        : this.indirectTestNote(cg, uniq, rel, targetFiles);
 
       entries.push(
         `- \`${root.name}\` (${rel(root.filePath)}:${root.startLine}) — ${uniq.length} caller${uniq.length === 1 ? '' : 's'}${where}${tests}`,
@@ -3097,7 +3116,7 @@ export class ToolHandler {
    * symbols had a test within 2-3 hops), so walk up to 2 more hops before
    * claiming anything — and even then claim only what was measured.
    */
-  private indirectTestNote(cg: CodeGraph, directCallers: Node[], rel: (p: string) => string): string {
+  private indirectTestNote(cg: CodeGraph, directCallers: Node[], rel: (p: string) => string, targetFiles?: ReadonlySet<string>): string {
     const MAX_HOPS = 3; // direct callers are hop 1
     const BUDGET = 64;  // getCallers lookups per entry — bounds god-fan-in symbols
     const FILE_CAP = 2;
@@ -3114,6 +3133,7 @@ export class ToolHandler {
         for (const c of callers) {
           const n = c?.node;
           if (!n || visited.has(n.id)) continue;
+          if (targetFiles !== undefined && !targetFiles.has(n.filePath)) continue;
           visited.add(n.id);
           const f = rel(n.filePath);
           if (isTestFile(f)) found.add(f);
@@ -3220,12 +3240,21 @@ export class ToolHandler {
   private async handleExplore(args: Record<string, unknown>): Promise<ToolResult> {
     const rawQuery = this.validateString(args.query, 'query');
     if (typeof rawQuery !== 'string') return rawQuery;
+    const rawTarget = this.validateOptionalPath(args.target, 'target');
+    if (typeof rawTarget !== 'string' && rawTarget !== undefined) return rawTarget;
     // One normalization point so the flow-builder, relevance search, and
     // ranking all see the same canonical spelling (Erlang `mod:fn/arity`).
     const query = normalizeQuerySpelling(rawQuery);
 
     const cg = this.getCodeGraph(args.projectPath as string | undefined);
     const projectRoot = cg.getProjectRoot();
+    const target = rawTarget === undefined ? null : cg.getTarget(rawTarget);
+    if (rawTarget !== undefined && !target) {
+      return this.errorResult(`Unknown build.toml target "${rawTarget}". Pass a relative target path shown by codegraph packages.`);
+    }
+    const targetPath = target?.path;
+    const targetFiles = targetPath === undefined ? undefined : new Set(cg.getTargetFiles(targetPath));
+    const isInTarget = (node: Node): boolean => targetFiles === undefined || targetFiles.has(node.filePath);
 
     // Resolve adaptive output budget from project size. Falls back to the
     // largest-tier defaults if stats aren't available, which preserves
@@ -3255,7 +3284,7 @@ export class ToolHandler {
       try {
         const extraction = extractQueryPaths(
           rawQuery,
-          cg.getFiles().map((f) => f.path),
+          targetFiles ? [...targetFiles] : cg.getFiles().map((f) => f.path),
           { maxPins: maxFiles },
         );
         if (extraction.pinnedFiles.length > 0 || extraction.unresolvedPathSpans.length > 0) {
@@ -3330,6 +3359,7 @@ export class ToolHandler {
       traversalDepth: 3,
       maxNodes: 200,
       minScore: 0.2,
+      targetPath,
     });
 
     // Pinned files' symbols enter the gather unconditionally — the agent named
@@ -3340,10 +3370,21 @@ export class ToolHandler {
       let fileNodes: Node[] = [];
       try { fileNodes = cg.getNodesInFile(fp); } catch { continue; }
       fileNodes
-        .filter((n) => n.kind !== 'file' && n.kind !== 'import' && n.kind !== 'export')
+        .filter((n) => isInTarget(n) && n.kind !== 'file' && n.kind !== 'import' && n.kind !== 'export')
         .sort((a, b) => a.startLine - b.startLine)
         .slice(0, PINNED_FILE_NODE_CAP)
         .forEach((n) => { if (!subgraph.nodes.has(n.id)) subgraph.nodes.set(n.id, n); });
+    }
+
+    // Keep every downstream explore section inside the selected target. The
+    // context builder and pinned-file path both apply the scope, but this final
+    // guard also covers future graph glue additions and stale associations.
+    if (targetFiles !== undefined) {
+      for (const [id, node] of subgraph.nodes) {
+        if (!isInTarget(node)) subgraph.nodes.delete(id);
+      }
+      subgraph.roots = subgraph.roots.filter((id) => subgraph.nodes.has(id));
+      subgraph.edges = subgraph.edges.filter((edge) => subgraph.nodes.has(edge.source) && subgraph.nodes.has(edge.target));
     }
 
     if (subgraph.nodes.size === 0) {
@@ -3385,6 +3426,7 @@ export class ToolHandler {
       for (const nb of neighbors) {
         if (glueNodeIds.size >= GLUE_NODE_CAP) break;
         if (subgraph.nodes.has(nb.id)) continue;
+        if (!isInTarget(nb)) continue;
         if (!subgraphFiles.has(nb.filePath)) continue;
         subgraph.nodes.set(nb.id, nb);
         glueNodeIds.add(nb.id);
@@ -3483,7 +3525,7 @@ export class ToolHandler {
         // type-token bias below couldn't pick the harness.rs one. (Same fix as
         // codegraph_node's findSymbolMatches.) Qualified tokens keep findAllSymbols.
         const isQual = /[.\/]|::/.test(t);
-        const raw = isQual ? this.findAllSymbols(cg, t).nodes : cg.getNodesByName(t);
+        const raw = (isQual ? this.findAllSymbols(cg, t).nodes : cg.getNodesByName(t)).filter(isInTarget);
         // A query that NAMES a declared type is a question ABOUT that type, and
         // must still reach its declaration file at full weight — so record the
         // files those declarations live in and exempt them from the
@@ -3519,6 +3561,7 @@ export class ToolHandler {
               kinds: ['function', 'method', 'component', 'variable', 'constant'],
               limit: 60,
             })
+            .filter(isInTarget)
             .filter((n) => SEEDABLE.has(n.kind) && !isTestPath(n.filePath))
             .filter((n) => {
               const idx = n.name.toLowerCase().indexOf(lcToken);
@@ -4056,7 +4099,7 @@ export class ToolHandler {
     // Blast radius (always-on, compact): for the entry symbols, who depends on
     // them + which tests cover them — locations only, no source — so the agent
     // knows what to update/verify before editing without a separate call.
-    const blastRadius = this.buildBlastRadiusSection(cg, subgraph);
+    const blastRadius = this.buildBlastRadiusSection(cg, subgraph, targetFiles);
     if (blastRadius) lines.push(blastRadius);
 
     // Relationship map — show how symbols connect
@@ -4098,7 +4141,7 @@ export class ToolHandler {
     // Compute the flow spine once — used both to prepend the Flow section (below)
     // and to gate adaptive source sizing: files on the spine get full source,
     // off-spine peers skeletonize.
-    const flow = this.buildFlowFromNamedSymbols(cg, matchQuery);
+    const flow = this.buildFlowFromNamedSymbols(cg, matchQuery, targetFiles);
 
     // Snapshot every ranked candidate's scoring inputs, in final sort order, so
     // the diagnostic can show what each file's share of the envelope was BOUGHT

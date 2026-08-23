@@ -140,7 +140,7 @@ function extractSymbolsFromQuery(query: string): string[] {
  * - Smaller code block size limit
  * - Shallower traversal
  */
-const DEFAULT_BUILD_OPTIONS: Required<BuildContextOptions> = {
+const DEFAULT_BUILD_OPTIONS = {
   maxNodes: 20,           // Reduced from 50 - most tasks don't need 50 symbols
   maxCodeBlocks: 5,       // Reduced from 10 - only show most relevant code
   maxCodeBlockSize: 1500, // Reduced from 2000
@@ -149,6 +149,7 @@ const DEFAULT_BUILD_OPTIONS: Required<BuildContextOptions> = {
   searchLimit: 3,         // Reduced from 5 - fewer entry points
   traversalDepth: 1,      // Reduced from 2 - shallower graph expansion
   minScore: 0.3,
+  targetPath: undefined as string | undefined,
 };
 
 /**
@@ -164,7 +165,7 @@ const HIGH_VALUE_NODE_KINDS: NodeKind[] = [
 /**
  * Default options for finding relevant context
  */
-const DEFAULT_FIND_OPTIONS: Required<FindRelevantContextOptions> = {
+const DEFAULT_FIND_OPTIONS = {
   searchLimit: 3,        // Reduced from 5
   traversalDepth: 1,     // Reduced from 2
   maxNodes: 20,          // Reduced from 50
@@ -172,6 +173,7 @@ const DEFAULT_FIND_OPTIONS: Required<FindRelevantContextOptions> = {
   edgeKinds: [],
   nodeKinds: HIGH_VALUE_NODE_KINDS, // Filter out imports/exports by default
   seedNames: [],         // Segment-vocab supplement — filled by the facade
+  targetPath: undefined as string | undefined,
 };
 
 // Re-export the low-confidence sentinel (defined in a dependency-free leaf so
@@ -245,6 +247,7 @@ export class ContextBuilder {
       traversalDepth: opts.traversalDepth,
       maxNodes: opts.maxNodes,
       minScore: opts.minScore,
+      targetPath: opts.targetPath,
     });
 
     // Get entry points (nodes from semantic search)
@@ -458,6 +461,10 @@ export class ContextBuilder {
     options: FindRelevantContextOptions = {}
   ): Promise<Subgraph> {
     const opts = { ...DEFAULT_FIND_OPTIONS, ...options };
+    const targetFiles = opts.targetPath === undefined
+      ? undefined
+      : new Set(this.queries.getMonorepoTargetFiles(opts.targetPath));
+    const targetFilePaths = targetFiles ? [...targetFiles] : undefined;
 
     // Start with empty subgraph
     const nodes = new Map<string, Node>();
@@ -484,6 +491,7 @@ export class ContextBuilder {
           exactMatches = this.queries.findNodesByExactName(symbolsFromQuery, {
             limit: Math.ceil(opts.searchLimit * 5),
             kinds: opts.nodeKinds && opts.nodeKinds.length > 0 ? opts.nodeKinds : undefined,
+            targetPath: opts.targetPath,
           });
         }
 
@@ -499,6 +507,7 @@ export class ContextBuilder {
           const seedResults = this.queries.findNodesByExactName(opts.seedNames, {
             limit: Math.ceil(opts.searchLimit * 3),
             kinds: opts.nodeKinds && opts.nodeKinds.length > 0 ? opts.nodeKinds : undefined,
+            targetPath: opts.targetPath,
           });
           const known = new Set(exactMatches.map((r) => r.node.id));
           for (const r of seedResults) {
@@ -561,6 +570,7 @@ export class ContextBuilder {
         const prefixResults = this.queries.searchNodes(titleCased, {
           limit: 30,
           kinds: definitionKinds,
+          targetPath: opts.targetPath,
         });
         const matched: SearchResult[] = [];
         for (const r of prefixResults) {
@@ -608,6 +618,7 @@ export class ContextBuilder {
           const termResults = this.queries.searchNodes(term, {
             limit: opts.searchLimit * 2,
             kinds: searchKinds,
+            targetPath: opts.targetPath,
           });
           for (const r of termResults) {
             const existing = termResultsMap.get(r.node.id);
@@ -826,11 +837,13 @@ export class ContextBuilder {
             limit: 200,
             kinds: camelDefinitionKinds,
             excludePrefix: true,
+            targetPath: opts.targetPath,
           }),
           ...this.queries.findNodesByNameSubstring(titleCased, {
             limit: 200,
             kinds: camelCallableKinds,
             excludePrefix: true,
+            targetPath: opts.targetPath,
           }),
         ];
 
@@ -920,12 +933,14 @@ export class ContextBuilder {
               limit: 200,
               kinds: camelDefinitionKinds,
               excludePrefix: false,
+              targetPath: opts.targetPath,
             }),
             // Same separate callable batch as Step 5b (#1196).
             ...this.queries.findNodesByNameSubstring(titleCased, {
               limit: 200,
               kinds: camelCallableKinds,
               excludePrefix: false,
+              targetPath: opts.targetPath,
             }),
           ];
 
@@ -979,7 +994,8 @@ export class ContextBuilder {
     // Resolve imports/exports to their actual definitions
     // If someone searches "terminal" and finds `import { TerminalPanel }`,
     // they want the TerminalPanel class, not the import statement
-    filteredResults = this.resolveImportsToDefinitions(filteredResults);
+    filteredResults = this.resolveImportsToDefinitions(filteredResults)
+      .filter((result) => targetFiles === undefined || targetFiles.has(result.node.filePath));
 
     // Cap entry points so traversal budget isn't spread too thin.
     // With 36 entry points and maxNodes=120, each gets only 3 nodes — useless.
@@ -1036,12 +1052,13 @@ export class ContextBuilder {
       if (typeHierarchyKinds.has(result.node.kind)) {
         const hierarchy = this.traverser.getTypeHierarchy(result.node.id);
         for (const [id, node] of hierarchy.nodes) {
-          if (!nodes.has(id)) {
+          if (!nodes.has(id) && (targetFiles === undefined || targetFiles.has(node.filePath))) {
             nodes.set(id, node);
             hierarchyNodesAdded++;
           }
         }
         for (const edge of hierarchy.edges) {
+          if (targetFiles !== undefined && (!nodes.has(edge.source) || !nodes.has(edge.target))) continue;
           const exists = edges.some(
             (e) => e.source === edge.source && e.target === edge.target && e.kind === edge.kind
           );
@@ -1062,7 +1079,9 @@ export class ContextBuilder {
         if (hierarchyNodesAdded >= maxHierarchyNodes) break;
         const siblingHierarchy = this.traverser.getTypeHierarchy(candidate.id);
         for (const [id, node] of siblingHierarchy.nodes) {
-          if (!nodes.has(id) && hierarchyNodesAdded < maxHierarchyNodes) {
+          if (!nodes.has(id)
+            && (targetFiles === undefined || targetFiles.has(node.filePath))
+            && hierarchyNodesAdded < maxHierarchyNodes) {
             nodes.set(id, node);
             hierarchyNodesAdded++;
           }
@@ -1086,6 +1105,7 @@ export class ContextBuilder {
         maxDepth: opts.traversalDepth,
         edgeKinds: opts.edgeKinds && opts.edgeKinds.length > 0 ? opts.edgeKinds : undefined,
         nodeKinds: opts.nodeKinds && opts.nodeKinds.length > 0 ? opts.nodeKinds : undefined,
+        filePaths: targetFilePaths ?? [],
         direction: 'both',
         limit: Math.ceil(opts.maxNodes / Math.max(1, filteredResults.length)),
       });
@@ -1222,6 +1242,14 @@ export class ContextBuilder {
         finalEdges.push(edge);
         existingEdgeKeys.add(key);
       }
+    }
+
+    if (targetFiles !== undefined) {
+      for (const [id, node] of finalNodes) {
+        if (!targetFiles.has(node.filePath)) finalNodes.delete(id);
+      }
+      roots.splice(0, roots.length, ...roots.filter((id) => finalNodes.has(id)));
+      finalEdges = finalEdges.filter((edge) => finalNodes.has(edge.source) && finalNodes.has(edge.target));
     }
 
     return { nodes: finalNodes, edges: finalEdges, roots, confidence };

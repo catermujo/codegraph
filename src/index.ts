@@ -59,7 +59,7 @@ import { CodeGraphPackageVersion } from './mcp/version';
 import { extractSegmentSearchWords, segmentLookupVariants, splitIdentifierSegments } from './search/identifier-segments';
 import { createYielder } from './resolution/cooperative-yield';
 import { minRefsForPool } from './resolution/resolver-pool';
-import { associateBuildTargets, discoverBuildTargets } from './monorepo-targets';
+import { associateBuildTargets, discoverBuildTargets, normalizeTargetPath } from './monorepo-targets';
 
 // Re-export types for consumers
 export * from './types';
@@ -69,7 +69,7 @@ export * from './types';
 // into dist/ (issue #354).
 export { getDatabasePath, DatabaseConnection } from './db';
 export { QueryBuilder } from './db/queries';
-export { associateBuildTargets, discoverBuildTargets, parseBuildToml } from './monorepo-targets';
+export { associateBuildTargets, discoverBuildTargets, normalizeTargetPath, parseBuildToml } from './monorepo-targets';
 export {
   getCodeGraphDir,
   isInitialized,
@@ -1639,6 +1639,11 @@ export class CodeGraph {
 
   getTargets() {
     return this.queries.getMonorepoTargets();
+  }
+
+  getTarget(targetPath: string) {
+    const normalized = normalizeTargetPath(targetPath);
+    return normalized ? this.queries.getMonorepoTarget(normalized) : null;
   }
 
   getTargetFiles(targetPath: string): string[] {

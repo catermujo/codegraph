@@ -17,6 +17,7 @@ const DEFAULT_OPTIONS: Required<TraversalOptions> = {
   direction: 'outgoing',
   limit: 1000,
   includeStart: true,
+  filePaths: [],
 };
 
 /**
@@ -47,9 +48,13 @@ export class GraphTraverser {
    */
   traverseBFS(startId: string, options: TraversalOptions = {}): Subgraph {
     const opts = { ...DEFAULT_OPTIONS, ...options };
+    const allowedFilePaths = opts.filePaths && opts.filePaths.length > 0 ? new Set(opts.filePaths) : undefined;
     const startNode = this.queries.getNodeById(startId);
 
     if (!startNode) {
+      return { nodes: new Map(), edges: [], roots: [] };
+    }
+    if (allowedFilePaths && !allowedFilePaths.has(startNode.filePath)) {
       return { nodes: new Map(), edges: [], roots: [] };
     }
 
@@ -111,6 +116,8 @@ export class GraphTraverser {
         const nextNode = neighborNodes.get(nextNodeId) ?? nodes.get(nextNodeId);
         if (!nextNode) continue;
 
+        if (allowedFilePaths && !allowedFilePaths.has(nextNode.filePath)) continue;
+
         if (opts.nodeKinds && opts.nodeKinds.length > 0 && !opts.nodeKinds.includes(nextNode.kind)) {
           continue;
         }
@@ -153,9 +160,13 @@ export class GraphTraverser {
    */
   traverseDFS(startId: string, options: TraversalOptions = {}): Subgraph {
     const opts = { ...DEFAULT_OPTIONS, ...options };
+    const allowedFilePaths = opts.filePaths && opts.filePaths.length > 0 ? new Set(opts.filePaths) : undefined;
     const startNode = this.queries.getNodeById(startId);
 
     if (!startNode) {
+      return { nodes: new Map(), edges: [], roots: [] };
+    }
+    if (allowedFilePaths && !allowedFilePaths.has(startNode.filePath)) {
       return { nodes: new Map(), edges: [], roots: [] };
     }
 
@@ -214,6 +225,8 @@ export class GraphTraverser {
 
       const nextNode = neighborNodes.get(nextNodeId);
       if (!nextNode) continue;
+
+      if (opts.filePaths && opts.filePaths.length > 0 && !opts.filePaths.includes(nextNode.filePath)) continue;
 
       // Apply node kind filter
       if (opts.nodeKinds && opts.nodeKinds.length > 0 && !opts.nodeKinds.includes(nextNode.kind)) {

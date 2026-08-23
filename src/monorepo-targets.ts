@@ -122,6 +122,10 @@ export function discoverBuildTargets(projectRoot: string): MonorepoTarget[] {
   return targets.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+export function normalizeTargetPath(value: string): string | null {
+  return normalizeRelativeValue(value);
+}
+
 export function associateBuildTargets(
   targets: readonly MonorepoTarget[],
   indexedFilePaths: readonly string[],
