@@ -519,6 +519,9 @@ export interface SearchOptions {
 
   /** Restrict search to files directly associated with this monorepo target */
   targetPath?: string;
+
+  /** Include files from resolved transitive build.toml dependencies */
+  includeDeps?: boolean;
 }
 
 /**
@@ -702,6 +705,9 @@ export interface BuildContextOptions {
 
   /** Restrict context to files directly associated with this monorepo target */
   targetPath?: string;
+
+  /** Include files from resolved transitive build.toml dependencies */
+  includeDeps?: boolean;
 }
 
 /**
@@ -774,4 +780,7 @@ export interface FindRelevantContextOptions {
 
   /** Restrict context to files directly associated with this monorepo target */
   targetPath?: string;
+
+  /** Include files from resolved transitive build.toml dependencies */
+  includeDeps?: boolean;
 }

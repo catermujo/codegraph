@@ -195,6 +195,7 @@ const DEFAULT_BUILD_OPTIONS = {
   traversalDepth: 1,      // Reduced from 2 - shallower graph expansion
   minScore: 0.3,
   targetPath: undefined as string | undefined,
+  includeDeps: false,
 };
 
 /**
@@ -219,6 +220,7 @@ const DEFAULT_FIND_OPTIONS = {
   nodeKinds: HIGH_VALUE_NODE_KINDS, // Filter out imports/exports by default
   seedNames: [],         // Segment-vocab supplement — filled by the facade
   targetPath: undefined as string | undefined,
+  includeDeps: false,
 };
 
 // Re-export the low-confidence sentinel (defined in a dependency-free leaf so
@@ -298,6 +300,7 @@ export class ContextBuilder {
       maxNodes: opts.maxNodes,
       minScore: opts.minScore,
       targetPath: opts.targetPath,
+      includeDeps: opts.includeDeps,
     });
 
     // Get entry points (nodes from semantic search)
@@ -505,7 +508,7 @@ export class ContextBuilder {
     const opts = { ...DEFAULT_FIND_OPTIONS, ...options };
     const targetFiles = opts.targetPath === undefined
       ? undefined
-      : new Set(this.queries.getMonorepoTargetFiles(opts.targetPath));
+      : new Set(this.queries.getMonorepoTargetFilesForScope(opts.targetPath, opts.includeDeps));
     const targetFilePaths = targetFiles ? [...targetFiles] : undefined;
 
     // Start with empty subgraph
@@ -534,6 +537,7 @@ export class ContextBuilder {
             limit: Math.ceil(opts.searchLimit * 5),
             kinds: opts.nodeKinds && opts.nodeKinds.length > 0 ? opts.nodeKinds : undefined,
             targetPath: opts.targetPath,
+            includeDeps: opts.includeDeps,
           });
         }
 
@@ -550,6 +554,7 @@ export class ContextBuilder {
             limit: Math.ceil(opts.searchLimit * 3),
             kinds: opts.nodeKinds && opts.nodeKinds.length > 0 ? opts.nodeKinds : undefined,
             targetPath: opts.targetPath,
+            includeDeps: opts.includeDeps,
           });
           const known = new Set(exactMatches.map((r) => r.node.id));
           for (const r of seedResults) {
@@ -613,6 +618,7 @@ export class ContextBuilder {
           limit: 30,
           kinds: definitionKinds,
           targetPath: opts.targetPath,
+          includeDeps: opts.includeDeps,
         });
         const matched: SearchResult[] = [];
         for (const r of prefixResults) {
@@ -710,6 +716,7 @@ export class ContextBuilder {
             limit: opts.searchLimit * 2,
             kinds: searchKinds,
             targetPath: opts.targetPath,
+            includeDeps: opts.includeDeps,
           });
           for (const r of termResults) {
             const existing = termResultsMap.get(r.node.id);
@@ -941,12 +948,14 @@ export class ContextBuilder {
             kinds: camelDefinitionKinds,
             excludePrefix: true,
             targetPath: opts.targetPath,
+            includeDeps: opts.includeDeps,
           }),
           ...this.queries.findNodesByNameSubstring(titleCased, {
             limit: 200,
             kinds: camelCallableKinds,
             excludePrefix: true,
             targetPath: opts.targetPath,
+            includeDeps: opts.includeDeps,
           }),
         ];
 
@@ -1032,6 +1041,7 @@ export class ContextBuilder {
               kinds: camelDefinitionKinds,
               excludePrefix: false,
               targetPath: opts.targetPath,
+              includeDeps: opts.includeDeps,
             }),
             // Same separate callable batch as Step 5b (#1196).
             ...this.queries.findNodesByNameSubstring(titleCased, {
@@ -1039,6 +1049,7 @@ export class ContextBuilder {
               kinds: camelCallableKinds,
               excludePrefix: false,
               targetPath: opts.targetPath,
+              includeDeps: opts.includeDeps,
             }),
           ];
 
