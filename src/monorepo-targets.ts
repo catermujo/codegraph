@@ -9,6 +9,13 @@ export interface ParsedBuildTarget {
   tags: string[];
 }
 
+export interface MonorepoTargetDependencyScope {
+  targetPath: string;
+  direct: string[];
+  transitive: string[];
+  paths: string[];
+}
+
 const BUILD_MANIFEST = 'build.toml';
 const MAX_SCAN_DEPTH = 16;
 const MAX_SCAN_DIRECTORIES = 20000;
@@ -124,6 +131,44 @@ export function discoverBuildTargets(projectRoot: string): MonorepoTarget[] {
 
 export function normalizeTargetPath(value: string): string | null {
   return normalizeRelativeValue(value);
+}
+
+export function resolveTargetDependencyScope(
+  targets: readonly MonorepoTarget[],
+  targetPath: string,
+): MonorepoTargetDependencyScope | null {
+  const normalizedTargetPath = normalizeTargetPath(targetPath);
+  if (!normalizedTargetPath) return null;
+
+  const targetsByPath = new Map<string, MonorepoTarget>();
+  for (const target of targets) {
+    const normalizedPath = normalizeTargetPath(target.path);
+    if (normalizedPath && !targetsByPath.has(normalizedPath)) targetsByPath.set(normalizedPath, target);
+  }
+  if (!targetsByPath.has(normalizedTargetPath)) return null;
+
+  const paths = [normalizedTargetPath];
+  const direct: string[] = [];
+  const transitive: string[] = [];
+  const visited = new Set(paths);
+  const queue: Array<{ path: string; depth: number }> = [{ path: normalizedTargetPath, depth: 0 }];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const currentTarget = targetsByPath.get(current.path);
+    if (!currentTarget) continue;
+    for (const dependency of currentTarget.deps) {
+      const normalizedDependency = normalizeTargetPath(dependency);
+      if (!normalizedDependency || visited.has(normalizedDependency) || !targetsByPath.has(normalizedDependency)) continue;
+      visited.add(normalizedDependency);
+      paths.push(normalizedDependency);
+      const depth = current.depth + 1;
+      (depth === 1 ? direct : transitive).push(normalizedDependency);
+      queue.push({ path: normalizedDependency, depth });
+    }
+  }
+
+  return { targetPath: normalizedTargetPath, direct, transitive, paths };
 }
 
 export function associateBuildTargets(

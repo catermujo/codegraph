@@ -16,6 +16,8 @@
  *   codegraph query <search>     Search for symbols
  *   codegraph files [options]    Show project file structure
  *   codegraph packages [path]    Show discovered monorepo build targets
+ *   codegraph dependencies <target> [path]
+ *                                Show a target's resolved dependencies
  *   codegraph context <task>     Build context for a task
  *   codegraph callers <symbol>   Find what calls a function/method
  *   codegraph callees <symbol>   Find what a function/method calls
@@ -1208,7 +1210,8 @@ program
   .option('-p, --path <path>', 'Project path')
   .option('--max-files <number>', 'Maximum number of files to include source from')
   .option('--target <path>', 'Restrict results to a build.toml target (direct files only)')
-  .action(async (queryParts: string[], options: { path?: string; maxFiles?: string; target?: string }) => {
+  .option('--include-deps', 'Include files from transitive build.toml dependencies (direct target files rank first)')
+  .action(async (queryParts: string[], options: { path?: string; maxFiles?: string; target?: string; includeDeps?: boolean }) => {
     const projectPath = resolveProjectPath(options.path);
 
     try {
@@ -1225,6 +1228,7 @@ program
       const args: Record<string, unknown> = { query: queryParts.join(' ') };
       if (options.maxFiles) args.maxFiles = parseInt(options.maxFiles, 10);
       if (options.target !== undefined) args.target = options.target;
+      if (options.includeDeps !== undefined) args.includeDeps = options.includeDeps;
       const result = await handler.execute('codegraph_explore', args);
 
       console.log(result.content[0]?.text ?? '');
@@ -1640,6 +1644,52 @@ program
       cg.destroy();
     } catch (err) {
       error(`Failed to list packages: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * codegraph dependencies <target> [path]
+ */
+program
+  .command('dependencies <target> [path]')
+  .description('Show direct and transitive build.toml dependencies for a target')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (targetArg: string, pathArg: string | undefined, options: { json?: boolean }) => {
+    const projectPath = resolveProjectPath(pathArg);
+
+    try {
+      if (!isInitialized(projectPath)) {
+        error(`CodeGraph not initialized in ${projectPath}`);
+        process.exit(1);
+      }
+
+      const { default: CodeGraph } = await loadCodeGraph();
+      const cg = CodeGraph.openSync(projectPath);
+      cg.refreshTargets();
+      const scope = cg.getTargetDependencyScope(targetArg);
+      if (!scope) {
+        error(`Unknown build.toml target "${targetArg}". Pass a relative target path shown by codegraph packages.`);
+        cg.destroy();
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(scope, null, 2));
+      } else {
+        console.log(chalk.bold(`\nTarget: ${scope.targetPath}\n`));
+        console.log(chalk.cyan('Direct dependencies:'));
+        for (const dependency of scope.direct) console.log(`  ${dependency}`);
+        if (scope.direct.length === 0) console.log('  -');
+        console.log(chalk.cyan('\nTransitive dependencies:'));
+        for (const dependency of scope.transitive) console.log(`  ${dependency}`);
+        if (scope.transitive.length === 0) console.log('  -');
+        console.log();
+      }
+
+      cg.destroy();
+    } catch (err) {
+      error(`Failed to list dependencies: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
   });

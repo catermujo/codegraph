@@ -1193,7 +1193,12 @@ export const tools: ToolDefinition[] = [
         },
         target: {
           type: 'string',
-          description: 'Restrict results to a relative build.toml target path; only files directly associated with that target are included (declared deps are not expanded).',
+          description: 'Restrict results to a relative build.toml target path; only files directly associated with that target are included unless includeDeps is enabled.',
+        },
+        includeDeps: {
+          type: 'boolean',
+          description: 'When target is set, include files from its transitive build.toml dependencies; direct target files rank first.',
+          default: false,
         },
         projectPath: projectPathProperty,
       },
@@ -3252,8 +3257,10 @@ export class ToolHandler {
     if (rawTarget !== undefined && !target) {
       return this.errorResult(`Unknown build.toml target "${rawTarget}". Pass a relative target path shown by codegraph packages.`);
     }
+    const includeDeps = args.includeDeps === true;
     const targetPath = target?.path;
-    const targetFiles = targetPath === undefined ? undefined : new Set(cg.getTargetFiles(targetPath));
+    const targetFiles = targetPath === undefined ? undefined : new Set(cg.getTargetFilesForScope(targetPath, includeDeps));
+    const directTargetFiles = targetPath === undefined ? undefined : new Set(cg.getTargetFiles(targetPath));
     const isInTarget = (node: Node): boolean => targetFiles === undefined || targetFiles.has(node.filePath);
 
     // Resolve adaptive output budget from project size. Falls back to the
@@ -3360,6 +3367,7 @@ export class ToolHandler {
       maxNodes: 200,
       minScore: 0.2,
       targetPath,
+      includeDeps,
     });
 
     // Pinned files' symbols enter the gather unconditionally — the agent named
@@ -3559,6 +3567,8 @@ export class ToolHandler {
           cands = cg
             .getNodesByNameSubstring(t, {
               kinds: ['function', 'method', 'component', 'variable', 'constant'],
+              targetPath,
+              includeDeps,
               limit: 60,
             })
             .filter(isInTarget)
@@ -4030,6 +4040,14 @@ export class ToolHandler {
     const sortedFiles = relevantFiles.sort((a, b) => {
       const aPath = a[0].toLowerCase();
       const bPath = b[0].toLowerCase();
+
+      // Direct target files stay ahead of dependency files when dependency
+      // expansion is explicitly requested.
+      if (includeDeps && directTargetFiles) {
+        const aDirect = directTargetFiles.has(a[0]) ? 1 : 0;
+        const bDirect = directTargetFiles.has(b[0]) ? 1 : 0;
+        if (aDirect !== bDirect) return bDirect - aDirect;
+      }
 
       // Pinned files first of all — the agent named the FILE by path, which is
       // even more explicit than naming a symbol in it. Among pins, keep the

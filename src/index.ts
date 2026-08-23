@@ -59,7 +59,11 @@ import { CodeGraphPackageVersion } from './mcp/version';
 import { extractSegmentSearchWords, segmentLookupVariants, splitIdentifierSegments } from './search/identifier-segments';
 import { createYielder } from './resolution/cooperative-yield';
 import { minRefsForPool } from './resolution/resolver-pool';
-import { associateBuildTargets, discoverBuildTargets, normalizeTargetPath } from './monorepo-targets';
+import {
+  associateBuildTargets,
+  discoverBuildTargets,
+  normalizeTargetPath,
+} from './monorepo-targets';
 
 // Re-export types for consumers
 export * from './types';
@@ -69,7 +73,14 @@ export * from './types';
 // into dist/ (issue #354).
 export { getDatabasePath, DatabaseConnection } from './db';
 export { QueryBuilder } from './db/queries';
-export { associateBuildTargets, discoverBuildTargets, normalizeTargetPath, parseBuildToml } from './monorepo-targets';
+export {
+  associateBuildTargets,
+  discoverBuildTargets,
+  normalizeTargetPath,
+  parseBuildToml,
+  MonorepoTargetDependencyScope,
+  resolveTargetDependencyScope,
+} from './monorepo-targets';
 export {
   getCodeGraphDir,
   isInitialized,
@@ -1373,7 +1384,7 @@ export class CodeGraph {
    */
   getNodesByNameSubstring(
     substring: string,
-    options: { kinds?: NodeKind[]; limit?: number; excludePrefix?: boolean } = {}
+    options: { kinds?: NodeKind[]; limit?: number; excludePrefix?: boolean; targetPath?: string; includeDeps?: boolean } = {}
   ): Node[] {
     return this.queries
       .findNodesByNameSubstring(substring, options)
@@ -1647,7 +1658,21 @@ export class CodeGraph {
   }
 
   getTargetFiles(targetPath: string): string[] {
-    return this.queries.getMonorepoTargetFiles(targetPath);
+    const normalized = normalizeTargetPath(targetPath);
+    return normalized ? this.queries.getMonorepoTargetFiles(normalized) : [];
+  }
+
+  getTargetScopePaths(targetPath: string, includeDeps = false): string[] {
+    return this.queries.getMonorepoTargetScopePaths(targetPath, includeDeps);
+  }
+
+  getTargetFilesForScope(targetPath: string, includeDeps = false): string[] {
+    return this.queries.getMonorepoTargetFilesForScope(targetPath, includeDeps);
+  }
+
+  getTargetDependencyScope(targetPath: string) {
+    const normalized = normalizeTargetPath(targetPath);
+    return normalized ? this.queries.getMonorepoTargetDependencyScope(normalized) : null;
   }
 
   /**

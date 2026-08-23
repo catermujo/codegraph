@@ -516,10 +516,11 @@ codegraph sync [path]             # Incremental update
 codegraph status [path]           # Show statistics
 codegraph unlock [path]           # Remove a stale lock file that's blocking indexing
 codegraph query <search>          # Search symbols (--kind, --limit, --json)
-codegraph explore <query>         # Relevant symbols' source + call paths in one shot (--target scopes to a build.toml target)
+codegraph explore <query>         # Relevant symbols' source + call paths in one shot (--target / --include-deps scope monorepos)
 codegraph node <symbol|file>      # One symbol's source + callers, or read a file with line numbers (same output as codegraph_node)
 codegraph files [path]            # Show file structure (--format, --filter, --max-depth, --json)
 codegraph packages [path]         # Show build.toml targets and dependencies (--json)
+codegraph dependencies <target> [path]  # Show direct/transitive target dependencies (--json)
 codegraph callers <symbol>        # Find what calls a function/method (--limit, --json)
 codegraph callees <symbol>        # Find what a function/method calls (--limit, --json)
 codegraph impact <symbol>         # Analyze what code is affected by changing a symbol (--depth, --json)
@@ -534,8 +535,11 @@ codegraph help [command]          # Show help, optionally for one command
 For build.toml-style monorepos, `codegraph index` discovers `[project]` and `[lib]` targets, stores their
 core/dependency metadata in the same SQLite index, and associates indexed files with the longest matching target
 path. Use `codegraph packages` to refresh and inspect that catalog. Scope a query to one target's directly associated
-files with `codegraph explore "SharedThing" --target rt/ui`. Target dependencies are metadata only: `--target` does
-not expand the result set to declared dependencies, and existing unscoped search/explore calls are unchanged.
+files with `codegraph explore "SharedThing" --target rt/ui`. This is direct-target scope by default; add
+`--include-deps` to include the resolved transitive dependency closure, with direct target files ranked first. Dependency
+paths are normalized relative to the project, unresolved external dependencies are ignored, and cycles are safe. Inspect
+the closure with `codegraph dependencies rt/ui` (`--json` is available). Existing unscoped and direct-target calls are
+unchanged.
 
 ### `codegraph affected`
 

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { CodeGraph } from '../src/index';
-import { associateBuildTargets, discoverBuildTargets, parseBuildToml } from '../src/monorepo-targets';
+import { associateBuildTargets, discoverBuildTargets, parseBuildToml, resolveTargetDependencyScope } from '../src/monorepo-targets';
 import { DatabaseConnection } from '../src/db';
 import { QueryBuilder } from '../src/db/queries';
 
@@ -52,6 +52,22 @@ describe('build.toml monorepo targets', () => {
     expect(associations.get('.')!).toEqual(['root.odin', 'other/nope.odin']);
     expect(associations.get('rt')!).toEqual(['rt/base.odin']);
     expect(associations.get('rt/ui')!).toEqual(['rt/ui/panel.odin']);
+  });
+
+  it('resolves normalized transitive dependencies, ignores missing targets, and terminates cycles', () => {
+    const targets = [
+      { path: 'app', name: 'app', kind: 'project' as const, manifestPath: 'app/build.toml', core: '.', deps: ['./lib-a', 'external-lib'], tags: [] },
+      { path: 'lib-a', name: 'lib-a', kind: 'lib' as const, manifestPath: 'lib-a/build.toml', core: '.', deps: ['lib-b'], tags: [] },
+      { path: 'lib-b', name: 'lib-b', kind: 'lib' as const, manifestPath: 'lib-b/build.toml', core: '.', deps: ['app'], tags: [] },
+    ];
+
+    expect(resolveTargetDependencyScope(targets, './app')).toEqual({
+      targetPath: 'app',
+      direct: ['lib-a'],
+      transitive: ['lib-b'],
+      paths: ['app', 'lib-a', 'lib-b'],
+    });
+    expect(resolveTargetDependencyScope(targets, 'missing')).toBeNull();
   });
 
   it('persists target metadata and file associations through the query layer', () => {
