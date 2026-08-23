@@ -91,6 +91,7 @@ export const LANGUAGES = [
   'arkts',
   'python',
   'go',
+  'odin',
   'rust',
   'java',
   'c',
