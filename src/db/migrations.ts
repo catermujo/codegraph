@@ -10,7 +10,7 @@ import { referenceNameTail, MEMBER_TAIL_SQL, MODULE_PARKED_SQL } from './referen
 /**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 16;
+export const CURRENT_SCHEMA_VERSION = 17;
 
 /**
  * Migration definition
@@ -27,6 +27,8 @@ interface Migration {
  * Note: Version 1 is the initial schema, handled by schema.sql
  * Future migrations go here.
  */
+const MONOREPO_TARGETS_MIGRATION = 'Add build-target metadata and indexed file associations for monorepos';
+
 const migrations: Migration[] = [
   {
     version: 2,
@@ -312,6 +314,41 @@ const migrations: Migration[] = [
       // schema.sql: the expression is MEMBER_TAIL_SQL.
       db.exec(`
         CREATE INDEX IF NOT EXISTS idx_unresolved_failed_module_member ON unresolved_refs(status, ${MEMBER_TAIL_SQL}) WHERE ${MODULE_PARKED_SQL};
+      `);
+    },
+  },
+  {
+    version: 17,
+    description: MONOREPO_TARGETS_MIGRATION,
+    up: (db) => {
+      // DUMBAI: The previous fork used v10 for targets and skipped upstream's v10 synthesis migration.
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'synthesis_inputs'").get()) {
+        migrations.find((migration) => migration.version === 10)!.up(db);
+      }
+      // Fork builds before 1.6.4 recorded these targets as v16, so upstream's v16 never ran there.
+      const recordedV16 = db.prepare('SELECT description FROM schema_versions WHERE version = 16').get() as { description?: string } | undefined;
+      if (recordedV16?.description === MONOREPO_TARGETS_MIGRATION) {
+        migrations.find((migration) => migration.version === 16)!.up(db);
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS monorepo_targets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          path TEXT NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          manifest_path TEXT NOT NULL,
+          core TEXT NOT NULL,
+          deps TEXT NOT NULL DEFAULT '[]',
+          tags TEXT NOT NULL DEFAULT '[]',
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS monorepo_target_files (
+          target_id INTEGER NOT NULL,
+          file_path TEXT NOT NULL,
+          PRIMARY KEY (target_id, file_path),
+          FOREIGN KEY (target_id) REFERENCES monorepo_targets(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_monorepo_target_files_path ON monorepo_target_files(file_path);
       `);
     },
   },

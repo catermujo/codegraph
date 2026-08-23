@@ -60,6 +60,7 @@ import { loadDeprioritizePatterns } from './project-config';
 import { CodeGraphPackageVersion } from './mcp/version';
 import { extractSegmentSearchWords, segmentLookupVariants, splitIdentifierSegments } from './search/identifier-segments';
 import { createYielder } from './resolution/cooperative-yield';
+import { associateBuildTargets, discoverBuildTargets } from './monorepo-targets';
 
 // Re-export types for consumers
 export * from './types';
@@ -69,6 +70,7 @@ export * from './types';
 // into dist/ (issue #354).
 export { getDatabasePath, DatabaseConnection } from './db';
 export { QueryBuilder } from './db/queries';
+export { associateBuildTargets, discoverBuildTargets, parseBuildToml } from './monorepo-targets';
 export {
   getCodeGraphDir,
   isInitialized,
@@ -953,6 +955,8 @@ export class CodeGraph {
         // orchestrator's covers extraction alone, and the summary printed it
         // as the run's, leaving out resolution and linking (#2334).
         result.durationMs = Date.now() - startedAt;
+        try { this.refreshTargets(); } catch { /* target metadata is advisory */ }
+
         return result;
       } finally {
         // Restore the auto-checkpoint interval AFTER the fold-up above so the
@@ -1958,6 +1962,17 @@ export class CodeGraph {
         this.stampModuleConfigSnapshotIfMoved();
         // The whole sync, as for indexAll: resolution and linking included (#2334).
         result.durationMs = Date.now() - startedAt;
+        const scopedManifestChanged = options.paths?.some(
+          (filePath) => path.posix.basename(filePath.replace(/\\/g, '/')) === 'build.toml',
+        ) ?? false;
+        if (fullReconcile || scopedManifestChanged) {
+          try { this.refreshTargets(); } catch { /* target metadata is advisory */ }
+        } else if (result.filesAdded > 0 || result.filesModified > 0 || result.filesRemoved > 0) {
+          try {
+            this.refreshTargetAssociations(options.paths);
+          } catch { /* target associations are advisory */ }
+        }
+
         return result;
       } finally {
         // Mirror indexAll's teardown: stop the valve, then restore the
@@ -3036,6 +3051,30 @@ export class CodeGraph {
    */
   getFiles(): FileRecord[] {
     return this.queries.getAllFiles();
+  }
+
+  refreshTargets() {
+    const targets = discoverBuildTargets(this.projectRoot);
+    const filesByTarget = associateBuildTargets(targets, this.getFiles().map((file) => file.path));
+    this.queries.replaceMonorepoTargets(targets, filesByTarget);
+    return targets;
+  }
+
+  refreshTargetAssociations(affectedFilePaths?: readonly string[]): void {
+    const targets = this.getTargets();
+    const indexedFilePaths = affectedFilePaths
+      ? affectedFilePaths.filter((filePath) => this.getFile(filePath) !== null)
+      : this.getFiles().map((file) => file.path);
+    const filesByTarget = associateBuildTargets(targets, indexedFilePaths);
+    this.queries.replaceMonorepoTargetFiles(filesByTarget, affectedFilePaths);
+  }
+
+  getTargets() {
+    return this.queries.getMonorepoTargets();
+  }
+
+  getTargetFiles(targetPath: string): string[] {
+    return this.queries.getMonorepoTargetFiles(targetPath);
   }
 
   /**
