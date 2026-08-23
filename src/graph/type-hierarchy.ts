@@ -472,10 +472,10 @@ function membersOf(
  * disagrees with the length of the list beside it is the bug this function
  * exists to prevent.
  */
-export function countImplementers(cg: CodeGraph, typeId: string): number {
+export function countImplementers(cg: CodeGraph, typeId: string, allowedFiles?: ReadonlySet<string>): number {
   try {
     const edges = cg.getIncomingEdgesTo([typeId], [...HIERARCHY_EDGE_KINDS]);
-    return new Set(edges.map((e) => e.source)).size;
+    return new Set(edges.filter((edge) => allowedFiles === undefined || allowedFiles.has(cg.getNode(edge.source)?.filePath ?? '')).map((e) => e.source)).size;
   } catch {
     return 0;
   }

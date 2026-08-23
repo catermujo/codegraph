@@ -107,6 +107,8 @@ export interface BoundaryContinuations {
 }
 
 export interface BoundaryScanOptions {
+  /** DUMBAI: Apply build-target scope before shortlist caps consume out-of-target candidates. */
+  allowedFiles?: ReadonlySet<string>;
   /** Dispatch sites returned in total. Default {@link MAX_BOUNDARY_SITES}. */
   maxSites?: number;
   /** Symbols the reader named — candidates matching one are marked and sort first. */
@@ -152,7 +154,7 @@ export function findDynamicBoundaries(
 
   for (const node of scanList) {
     if (sites >= maxSites || scanned >= MAX_SCAN || charsScanned > MAX_TOTAL_CHARS) break;
-    if (seenNode.has(node.id) || !node.startLine || !node.endLine) continue;
+    if (seenNode.has(node.id) || !node.startLine || !node.endLine || (opts.allowedFiles !== undefined && !opts.allowedFiles.has(node.filePath))) continue;
     seenNode.add(node.id);
     const absPath = validatePathWithinRoot(projectRoot, node.filePath);
     if (!absPath || !existsSync(absPath)) continue;
@@ -173,7 +175,7 @@ export function findDynamicBoundaries(
       if (seenSite.has(siteKey)) continue;
       seenSite.add(siteKey);
       const shortlist = match.key
-        ? shortlistBoundaryCandidates(cg, match.key, !!match.keyIsType, named, node.id)
+        ? shortlistBoundaryCandidates(cg, match.key, !!match.keyIsType, named, node.id, opts.allowedFiles)
         : { candidates: [], note: null };
       found.push({ ...match, candidates: shortlist.candidates, candidateNote: shortlist.note });
       sites++;
@@ -206,14 +208,15 @@ export function shortlistBoundaryCandidates(
   key: string,
   keyIsType: boolean,
   named: ReadonlyMap<string, Node>,
-  selfId: string
+  selfId: string,
+  allowedFiles?: ReadonlySet<string>
 ): { candidates: BoundaryCandidate[]; note: string | null } {
   const keyNorm = normalizeName(key);
   if (keyNorm.length < 3) return { candidates: [], note: null };
 
   const cands = new Map<string, Node>();
   const consider = (n: Node | undefined | null): void => {
-    if (!n || n.id === selfId || !CALLABLE_KINDS.has(n.kind) || cands.has(n.id)) return;
+    if (!n || n.id === selfId || !CALLABLE_KINDS.has(n.kind) || cands.has(n.id) || (allowedFiles !== undefined && !allowedFiles.has(n.filePath))) return;
     const nameNorm = normalizeName(n.name || '');
     if (nameNorm.length < 3) return;
     if (!nameNorm.includes(keyNorm) && !keyNorm.includes(nameNorm)) return;
