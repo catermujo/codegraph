@@ -59,6 +59,7 @@ import { CodeGraphPackageVersion } from './mcp/version';
 import { extractSegmentSearchWords, segmentLookupVariants, splitIdentifierSegments } from './search/identifier-segments';
 import { createYielder } from './resolution/cooperative-yield';
 import { minRefsForPool } from './resolution/resolver-pool';
+import { associateBuildTargets, discoverBuildTargets } from './monorepo-targets';
 
 // Re-export types for consumers
 export * from './types';
@@ -68,6 +69,7 @@ export * from './types';
 // into dist/ (issue #354).
 export { getDatabasePath, DatabaseConnection } from './db';
 export { QueryBuilder } from './db/queries';
+export { associateBuildTargets, discoverBuildTargets, parseBuildToml } from './monorepo-targets';
 export {
   getCodeGraphDir,
   isInitialized,
@@ -725,6 +727,8 @@ export class CodeGraph {
           }
         } catch { /* metadata is advisory — never fail an index over it */ }
 
+        try { this.refreshTargets(); } catch { /* target metadata is advisory */ }
+
         return result;
       } finally {
         // Restore the auto-checkpoint interval AFTER the fold-up above so the
@@ -1017,6 +1021,17 @@ export class CodeGraph {
         const fullReconcile = !options.paths || options.paths.length === 0;
         if (fullReconcile && this.getIndexState() === 'indexing') {
           try { this.queries.setMetadata('index_state', 'complete'); } catch { /* advisory */ }
+        }
+
+        const scopedManifestChanged = options.paths?.some(
+          (filePath) => path.posix.basename(filePath.replace(/\\/g, '/')) === 'build.toml',
+        ) ?? false;
+        if (fullReconcile || scopedManifestChanged) {
+          try { this.refreshTargets(); } catch { /* target metadata is advisory */ }
+        } else if (result.filesAdded > 0 || result.filesModified > 0 || result.filesRemoved > 0) {
+          try {
+            this.refreshTargetAssociations(options.paths);
+          } catch { /* target associations are advisory */ }
         }
 
         return result;
@@ -1604,6 +1619,30 @@ export class CodeGraph {
    */
   getFiles(): FileRecord[] {
     return this.queries.getAllFiles();
+  }
+
+  refreshTargets() {
+    const targets = discoverBuildTargets(this.projectRoot);
+    const filesByTarget = associateBuildTargets(targets, this.getFiles().map((file) => file.path));
+    this.queries.replaceMonorepoTargets(targets, filesByTarget);
+    return targets;
+  }
+
+  refreshTargetAssociations(affectedFilePaths?: readonly string[]): void {
+    const targets = this.getTargets();
+    const indexedFilePaths = affectedFilePaths
+      ? affectedFilePaths.filter((filePath) => this.getFile(filePath) !== null)
+      : this.getFiles().map((file) => file.path);
+    const filesByTarget = associateBuildTargets(targets, indexedFilePaths);
+    this.queries.replaceMonorepoTargetFiles(filesByTarget, affectedFilePaths);
+  }
+
+  getTargets() {
+    return this.queries.getMonorepoTargets();
+  }
+
+  getTargetFiles(targetPath: string): string[] {
+    return this.queries.getMonorepoTargetFiles(targetPath);
   }
 
   /**

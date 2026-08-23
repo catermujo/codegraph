@@ -16,6 +16,7 @@ import {
   GraphStats,
   SearchOptions,
   SearchResult,
+  MonorepoTarget,
 } from '../types';
 import { safeJsonParse } from '../utils';
 import { kindBonus, nameMatchBonus, scorePathRelevance } from '../search/query-utils';
@@ -2172,6 +2173,102 @@ export class QueryBuilder {
     }
     const rows = this.stmts.getAllFiles.all() as FileRow[];
     return rows.map(rowToFileRecord);
+  }
+
+  replaceMonorepoTargets(targets: readonly MonorepoTarget[], filesByTarget: ReadonlyMap<string, readonly string[]>): void {
+    this.db.transaction(() => {
+      this.db.exec('DELETE FROM monorepo_target_files; DELETE FROM monorepo_targets;');
+      const insertTarget = this.db.prepare(`
+        INSERT INTO monorepo_targets
+          (path, name, kind, manifest_path, core, deps, tags, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const findTarget = this.db.prepare('SELECT id FROM monorepo_targets WHERE path = ?');
+      const insertFile = this.db.prepare(
+        'INSERT INTO monorepo_target_files (target_id, file_path) VALUES (?, ?)'
+      );
+      for (const target of targets) {
+        insertTarget.run(
+          target.path,
+          target.name,
+          target.kind,
+          target.manifestPath,
+          target.core,
+          JSON.stringify(target.deps),
+          JSON.stringify(target.tags),
+          Date.now(),
+        );
+        const row = findTarget.get(target.path) as { id: number } | undefined;
+        if (!row) continue;
+        for (const filePath of filesByTarget.get(target.path) ?? []) {
+          insertFile.run(row.id, filePath);
+        }
+      }
+    })();
+  }
+
+  replaceMonorepoTargetFiles(
+    filesByTarget: ReadonlyMap<string, readonly string[]>,
+    affectedFilePaths?: readonly string[],
+  ): void {
+    this.db.transaction(() => {
+      if (affectedFilePaths) {
+        const deleteFile = this.db.prepare('DELETE FROM monorepo_target_files WHERE file_path = ?');
+        for (const filePath of new Set(affectedFilePaths)) deleteFile.run(filePath);
+      } else {
+        this.db.prepare('DELETE FROM monorepo_target_files').run();
+      }
+      const targetIds = new Map(
+        (this.db
+          .prepare('SELECT id, path FROM monorepo_targets')
+          .all() as Array<{ id: number; path: string }>).map((row) => [row.path, row.id]),
+      );
+      const insertFile = this.db.prepare(
+        'INSERT INTO monorepo_target_files (target_id, file_path) VALUES (?, ?)',
+      );
+
+      for (const [targetPath, filePaths] of filesByTarget) {
+        const targetId = targetIds.get(targetPath);
+        if (targetId === undefined) continue;
+        for (const filePath of filePaths) insertFile.run(targetId, filePath);
+      }
+    })();
+  }
+
+  getMonorepoTargets(): MonorepoTarget[] {
+    const rows = this.db.prepare(`
+      SELECT path, name, kind, manifest_path, core, deps, tags
+      FROM monorepo_targets
+      ORDER BY path
+    `).all() as Array<{
+      path: string;
+      name: string;
+      kind: string;
+      manifest_path: string;
+      core: string;
+      deps: string;
+      tags: string;
+    }>;
+    return rows.map((row) => ({
+      path: row.path,
+      name: row.name,
+      kind: row.kind as MonorepoTarget['kind'],
+      manifestPath: row.manifest_path,
+      core: row.core,
+      deps: safeJsonParse(row.deps, [] as string[]),
+      tags: safeJsonParse(row.tags, [] as string[]),
+    }));
+  }
+
+  getMonorepoTargetFiles(targetPath: string): string[] {
+    const rows = this.db.prepare(`
+      SELECT f.file_path
+      FROM monorepo_target_files f
+      JOIN monorepo_targets t ON t.id = f.target_id
+      WHERE t.path = ?
+      ORDER BY f.file_path
+    `).all(targetPath) as Array<{ file_path: string }>;
+    return rows.map((row) => row.file_path);
   }
 
   /**

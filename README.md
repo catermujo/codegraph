@@ -519,6 +519,7 @@ codegraph query <search>          # Search symbols (--kind, --limit, --json)
 codegraph explore <query>         # Relevant symbols' source + call paths in one shot (same output as the codegraph_explore MCP tool)
 codegraph node <symbol|file>      # One symbol's source + callers, or read a file with line numbers (same output as codegraph_node)
 codegraph files [path]            # Show file structure (--format, --filter, --max-depth, --json)
+codegraph packages [path]         # Show build.toml targets and dependencies (--json)
 codegraph callers <symbol>        # Find what calls a function/method (--limit, --json)
 codegraph callees <symbol>        # Find what a function/method calls (--limit, --json)
 codegraph impact <symbol>         # Analyze what code is affected by changing a symbol (--depth, --json)
@@ -529,6 +530,11 @@ codegraph upgrade [version]       # Update to the latest release (--check, --for
 codegraph version                 # Print the installed version (also -v, --version)
 codegraph help [command]          # Show help, optionally for one command
 ```
+
+For build.toml-style monorepos, `codegraph index` discovers `[project]` and `[lib]` targets, stores their
+core/dependency metadata in the same SQLite index, and associates indexed files with the longest matching target
+path. Use `codegraph packages` to refresh and inspect that catalog. Search and explore scoping are reserved for a
+later filter layer.
 
 ### `codegraph affected`
 

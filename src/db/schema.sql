@@ -205,3 +205,25 @@ CREATE TABLE IF NOT EXISTS project_metadata (
     value TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
+
+-- Build-target metadata for package-aware monorepo queries.
+CREATE TABLE IF NOT EXISTS monorepo_targets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    manifest_path TEXT NOT NULL,
+    core TEXT NOT NULL,
+    deps TEXT NOT NULL DEFAULT '[]',
+    tags TEXT NOT NULL DEFAULT '[]',
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS monorepo_target_files (
+    target_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    PRIMARY KEY (target_id, file_path),
+    FOREIGN KEY (target_id) REFERENCES monorepo_targets(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_monorepo_target_files_path ON monorepo_target_files(file_path);

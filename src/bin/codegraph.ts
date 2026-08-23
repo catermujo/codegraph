@@ -15,6 +15,7 @@
  *   codegraph status [path]      Show index status
  *   codegraph query <search>     Search for symbols
  *   codegraph files [options]    Show project file structure
+ *   codegraph packages [path]    Show discovered monorepo build targets
  *   codegraph context <task>     Build context for a task
  *   codegraph callers <symbol>   Find what calls a function/method
  *   codegraph callees <symbol>   Find what a function/method calls
@@ -1595,6 +1596,48 @@ program
       cg.destroy();
     } catch (err) {
       error(`Failed to list files: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * codegraph packages [path]
+ */
+program
+  .command('packages [path]')
+  .description('Show build.toml monorepo targets and their dependencies')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (pathArg: string | undefined, options: { json?: boolean }) => {
+    const projectPath = resolveProjectPath(pathArg);
+
+    try {
+      if (!isInitialized(projectPath)) {
+        error(`CodeGraph not initialized in ${projectPath}`);
+        process.exit(1);
+      }
+
+      const { default: CodeGraph } = await loadCodeGraph();
+      const cg = CodeGraph.openSync(projectPath);
+      const targets = cg.refreshTargets();
+
+      if (options.json) {
+        console.log(JSON.stringify(targets, null, 2));
+      } else if (targets.length === 0) {
+        info(`No valid build.toml targets found in ${projectPath}`);
+      } else {
+        console.log(chalk.bold(`\nMonorepo Targets (${targets.length}):\n`));
+        for (const target of targets) {
+          console.log(chalk.cyan(target.path) + chalk.dim(` (${target.kind})`));
+          console.log(chalk.dim(`  name: ${target.name}`));
+          console.log(chalk.dim(`  core: ${target.core}`));
+          console.log(chalk.dim(`  deps: ${target.deps.length > 0 ? target.deps.join(', ') : '-'}`));
+          console.log();
+        }
+      }
+
+      cg.destroy();
+    } catch (err) {
+      error(`Failed to list packages: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
   });

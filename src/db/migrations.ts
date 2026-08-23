@@ -9,7 +9,7 @@ import { SqliteDatabase } from './sqlite-adapter';
 /**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 /**
  * Migration definition
@@ -175,6 +175,32 @@ const migrations: Migration[] = [
       db.exec(
         'CREATE INDEX IF NOT EXISTS idx_files_generated ON files(path) WHERE generated = 1'
       );
+    },
+  },
+  {
+    version: 10,
+    description: 'Add build-target metadata and indexed file associations for monorepos',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS monorepo_targets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          path TEXT NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          manifest_path TEXT NOT NULL,
+          core TEXT NOT NULL,
+          deps TEXT NOT NULL DEFAULT '[]',
+          tags TEXT NOT NULL DEFAULT '[]',
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS monorepo_target_files (
+          target_id INTEGER NOT NULL,
+          file_path TEXT NOT NULL,
+          PRIMARY KEY (target_id, file_path),
+          FOREIGN KEY (target_id) REFERENCES monorepo_targets(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_monorepo_target_files_path ON monorepo_target_files(file_path);
+      `);
     },
   },
 ];

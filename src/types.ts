@@ -265,6 +265,18 @@ export interface FileRecord {
   generated?: boolean;
 }
 
+export type MonorepoTargetKind = 'project' | 'lib';
+
+export interface MonorepoTarget {
+  path: string;
+  name: string;
+  kind: MonorepoTargetKind;
+  manifestPath: string;
+  core: string;
+  deps: string[];
+  tags: string[];
+}
+
 // =============================================================================
 // Extraction Types
 // =============================================================================
