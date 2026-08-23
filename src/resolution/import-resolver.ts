@@ -37,6 +37,7 @@ const EXTENSION_RESOLUTION: Record<string, string[]> = {
   astro: ['.ts', '.js', '.astro', '.tsx', '.jsx', '/index.ts', '/index.js', '/index.astro'],
   python: ['.py', '/__init__.py'],
   go: ['.go'],
+  odin: ['.odin'],
   rust: ['.rs', '/mod.rs'],
   java: ['.java'],
   c: ['.h', '.c'],
@@ -141,6 +142,10 @@ function resolveImportPathUncached(
   // misclassified as an external package.
   if (language === 'cobol') {
     return resolveCobolCopybook(importPath, fromFile, context);
+  }
+
+  if (language === 'odin') {
+    return resolveOdinImportPath(importPath, fromFile, context);
   }
 
   // Skip external/npm packages — but pass the context so the
@@ -363,6 +368,13 @@ function isExternalImport(
     return true;
   }
 
+  if (language === 'odin') {
+    // Odin's core/system collections are compiler and platform libraries, not
+    // project directories. Other collection prefixes remain project-local.
+    const collection = importPath.split(':', 1)[0];
+    return collection === 'core' || collection === 'system';
+  }
+
   if (language === 'c' || language === 'cpp') {
     // C/C++ standard library headers — both C-style (<stdio.h>) and
     // C++-style (<cstdio>, <vector>) forms. Checked against the import
@@ -374,6 +386,92 @@ function isExternalImport(
   }
 
   return false;
+}
+
+function resolveOdinImportPath(
+  importPath: string,
+  fromFile: string,
+  context: ResolutionContext,
+): string | null {
+  return findOdinImportTargets(importPath, fromFile, context)[0] ?? null;
+}
+
+function findOdinImportTargets(
+  importPath: string,
+  fromFile: string,
+  context: ResolutionContext,
+): string[] {
+  if (!importPath || importPath.startsWith('core:') || importPath.startsWith('system:')) return [];
+
+  const projectRoot = context.getProjectRoot();
+  const fromDir = path.dirname(path.join(projectRoot, fromFile));
+  const colon = importPath.indexOf(':');
+  const packagePath = colon >= 0
+    ? path.join(importPath.slice(0, colon), importPath.slice(colon + 1).replace(/^\.\//, ''))
+    : importPath;
+  const bases = colon >= 0
+    ? [path.resolve(projectRoot, packagePath)]
+    : [path.resolve(fromDir, packagePath), path.resolve(projectRoot, packagePath)];
+
+  const files = context.getAllFiles()
+    .filter((file) => file.toLowerCase().endsWith('.odin'))
+    .map((file) => file.replace(/\\/g, '/'));
+  for (const base of bases) {
+    const relativeBase = path.relative(projectRoot, base).replace(/\\/g, '/');
+    const direct = files.find((file) => file === relativeBase || file === `${relativeBase}.odin`);
+    if (direct) return [direct];
+    const packageFiles = files
+      .filter((file) => path.posix.dirname(file) === relativeBase)
+      .sort();
+    if (packageFiles.length > 0) return packageFiles;
+  }
+  return [];
+}
+
+function resolveOdinReference(
+  ref: UnresolvedRef,
+  imports: ImportMapping[],
+  context: ResolutionContext,
+): ResolvedRef | null {
+  const importMapping = ref.referenceKind === 'imports'
+    ? imports.find((mapping) => mapping.source === ref.referenceName)
+    : imports.find(
+        (mapping) => ref.referenceName === mapping.localName || ref.referenceName.startsWith(`${mapping.localName}.`),
+      );
+
+  const source = importMapping?.source ?? (ref.referenceKind === 'imports' ? ref.referenceName : null);
+  if (ref.referenceKind === 'imports' && (!source || source.startsWith('core:') || source.startsWith('system:'))) return null;
+
+  const packageFile = source ? resolveOdinImportPath(source, ref.filePath, context) : null;
+  if (ref.referenceKind === 'imports') {
+    if (!packageFile || packageFile === ref.filePath) return null;
+    const fileNode = context.getNodesInFile(packageFile).find((node) => node.kind === 'file');
+    return fileNode
+      ? { original: ref, targetNodeId: fileNode.id, confidence: 0.9, resolvedBy: 'import' }
+      : null;
+  }
+
+  // DUMBAI: The Odin grammar exposes member calls as `member_expression(receiver,
+  // call_expression(function))`. The extractor preserves that receiver in the
+  // reference name, so a bare call cannot be safely assigned to an import.
+  if (!importMapping) return null;
+
+  const memberName = importMapping && ref.referenceName.startsWith(`${importMapping.localName}.`)
+    ? ref.referenceName.slice(importMapping.localName.length + 1).split('.')[0]
+    : ref.referenceName;
+  if (importMapping.source.startsWith('core:') || importMapping.source.startsWith('system:')) return null;
+  const targetFiles = findOdinImportTargets(importMapping.source, ref.filePath, context)
+    .filter((file) => file !== ref.filePath);
+  if (targetFiles.length === 0) return null;
+  for (const file of targetFiles) {
+    const target = context.getNodesInFile(file).find(
+      (node) => node.name === memberName &&
+        (node.kind === 'function' || node.kind === 'method' || node.kind === 'struct' ||
+          node.kind === 'union' || node.kind === 'enum' || node.kind === 'constant' || node.kind === 'variable'),
+    );
+    if (target) return { original: ref, targetNodeId: target.id, confidence: 0.9, resolvedBy: 'import' };
+  }
+  return null;
 }
 
 /**
@@ -781,6 +879,8 @@ export function extractImportMappings(
     mappings.push(...extractPythonImports(content));
   } else if (language === 'go') {
     mappings.push(...extractGoImports(content));
+  } else if (language === 'odin') {
+    mappings.push(...extractOdinImports(content));
   } else if (language === 'java' || language === 'kotlin') {
     mappings.push(...extractJavaImports(content));
   } else if (language === 'php') {
@@ -991,6 +1091,26 @@ function extractGoImports(content: string): ImportMapping[] {
     }
   }
 
+  return mappings;
+}
+
+function extractOdinImports(content: string): ImportMapping[] {
+  const mappings: ImportMapping[] = [];
+  const importRegex = /^\s*(?:(?:@\([^\r\n]*\)|@[A-Za-z_][A-Za-z0-9_]*)\s*)*(?:foreign\s+)?import\s+(?:(\w+)\s+)?["']([^"']+)["']/gm;
+  let match: RegExpExecArray | null;
+  while ((match = importRegex.exec(content)) !== null) {
+    const source = match[2]!;
+    const pathPart = source.includes(':') ? source.split(':', 2)[1]! : source;
+    const packageName = pathPart.replace(/\/$/, '').split('/').pop() || source.split(':')[0]!;
+    const localName = match[1] || (packageName === '.' ? source.split(':')[0]! : packageName);
+    mappings.push({
+      localName,
+      exportedName: '*',
+      source,
+      isDefault: false,
+      isNamespace: true,
+    });
+  }
   return mappings;
 }
 
@@ -1308,6 +1428,14 @@ export function resolveViaImport(
   ref: UnresolvedRef,
   context: ResolutionContext
 ): ResolvedRef | null {
+  if ((!ref.language || !ref.filePath) && context.getNodeById) {
+    const fromNode = context.getNodeById(ref.fromNodeId);
+    if (fromNode?.language === 'odin') {
+      // DUMBAI: Odin calls use the shared bare-call walker, which omits these fields.
+      ref = { ...ref, language: 'odin', filePath: fromNode.filePath };
+    }
+  }
+
   // C/C++ #include references — resolve directly to the included file
   // (file→file edge), bypassing symbol lookup. The extractor emits these
   // with `referenceKind: 'imports'` and `referenceName: <include path>`
@@ -1439,6 +1567,11 @@ export function resolveViaImport(
   if (ref.language === 'go') {
     const goResult = resolveGoCrossPackageReference(ref, imports, context);
     if (goResult) return goResult;
+  }
+
+  if (ref.language === 'odin') {
+    const odinResult = resolveOdinReference(ref, imports, context);
+    if (odinResult) return odinResult;
   }
 
   // Java / Kotlin: imports are FQNs (`import com.example.Foo;`) — no

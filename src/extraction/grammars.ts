@@ -24,6 +24,7 @@ const WASM_GRAMMAR_FILES: Record<GrammarLanguage, string> = {
   jsx: 'tree-sitter-javascript.wasm',
   python: 'tree-sitter-python.wasm',
   go: 'tree-sitter-go.wasm',
+  odin: 'tree-sitter-odin.wasm',
   rust: 'tree-sitter-rust.wasm',
   java: 'tree-sitter-java.wasm',
   c: 'tree-sitter-c.wasm',
@@ -75,6 +76,7 @@ export const EXTENSION_MAP: Record<string, Language> = {
   '.py': 'python',
   '.pyw': 'python',
   '.go': 'go',
+  '.odin': 'odin',
   '.rs': 'rust',
   '.java': 'java',
   '.c': 'c',
@@ -292,6 +294,7 @@ const VENDORED_WASM_LANGS: ReadonlySet<GrammarLanguage> = new Set([
   'pascal', 'scala', 'lua', 'luau', 'csharp', 'r', 'cfml', 'cfscript', 'cfquery',
   'cobol', 'vbnet', 'erlang', 'terraform', 'arkts', 'nix',
   'typescript', 'tsx', 'javascript', 'jsx', 'java', 'python', 'go',
+  'odin',
   // R7a (C/C++ kernel port prep): tree-sitter-c v0.24.2 (b780e47) +
   // tree-sitter-cpp v0.23.4 (f41e1a0), parser.c/scanner.c sha-matched against
   // the crates.io tarballs. `.metal`/`.cu` map to language 'cpp', so the
@@ -620,6 +623,7 @@ export function getLanguageDisplayName(language: Language): string {
     jsx: 'JavaScript (JSX)',
     python: 'Python',
     go: 'Go',
+    odin: 'Odin',
     rust: 'Rust',
     r: 'R',
     java: 'Java',

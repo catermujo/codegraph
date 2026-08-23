@@ -12,6 +12,7 @@ import { typescriptExtractor } from './typescript';
 import { javascriptExtractor } from './javascript';
 import { pythonExtractor } from './python';
 import { goExtractor } from './go';
+import { odinExtractor } from './odin';
 import { rustExtractor } from './rust';
 import { javaExtractor } from './java';
 import { cExtractor, cppExtractor } from './c-cpp';
@@ -44,6 +45,7 @@ export const EXTRACTORS: Partial<Record<Language, LanguageExtractor>> = {
   jsx: javascriptExtractor,
   python: pythonExtractor,
   go: goExtractor,
+  odin: odinExtractor,
   rust: rustExtractor,
   java: javaExtractor,
   c: cExtractor,
