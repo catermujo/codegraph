@@ -2762,7 +2762,14 @@ export class CodeGraph {
    */
   getNodesByNameSubstring(
     substring: string,
-    options: { kinds?: NodeKind[]; limit?: number; excludePrefix?: boolean; targetPath?: string; includeDeps?: boolean } = {}
+    options: {
+      kinds?: NodeKind[];
+      limit?: number;
+      excludePrefix?: boolean;
+      targetPath?: string;
+      includeDeps?: boolean;
+      allowedFilePaths?: readonly string[];
+    } = {}
   ): Node[] {
     return this.queries
       .findNodesByNameSubstring(substring, options)

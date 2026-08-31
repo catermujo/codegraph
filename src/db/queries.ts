@@ -17,6 +17,8 @@ import {
   SearchOptions,
   SearchResult,
   MonorepoTarget,
+  SymbolAnchorKind,
+  SymbolResolution,
 } from '../types';
 import { safeJsonParse } from '../utils';
 import { isTestFile, kindBonus, nameMatchBonus, scorePathRelevance } from '../search/query-utils';
@@ -608,6 +610,17 @@ export class QueryBuilder {
       JOIN monorepo_targets mt ON mt.id = mtf.target_id
       WHERE mt.path IN (${targetPaths.map(() => '?').join(',')}) AND mtf.file_path = nodes.file_path
     )`;
+  }
+
+  private appendAllowedFilePaths(
+    sql: string,
+    params: (string | number)[],
+    allowedFilePaths: readonly string[] | undefined,
+  ): string {
+    if (allowedFilePaths === undefined) return sql;
+    if (allowedFilePaths.length === 0) return `${sql} AND 1 = 0`;
+    params.push(JSON.stringify(allowedFilePaths));
+    return `${sql} AND nodes.file_path IN (SELECT value FROM json_each(?))`;
   }
 
   private targetOrderClause(
@@ -1808,6 +1821,61 @@ export class QueryBuilder {
     return this.stmts.getNodesByName.all(name);
   }
 
+  /** Resolve one shape-precise symbol without applying a relevance limit. */
+  resolveExactSymbol(
+    raw: string,
+    kind: SymbolAnchorKind,
+    options: SearchOptions = {},
+  ): SymbolResolution {
+    const parts = raw.split(/::|\./).filter(Boolean);
+    const lookupName = parts[parts.length - 1] ?? raw;
+    const normalized = kind === 'qualified'
+      ? parts.join('::').toLowerCase()
+      : raw.toLowerCase();
+    const cap = 64;
+    let sql = `SELECT nodes.* FROM nodes WHERE lower(nodes.name) = lower(?)`;
+    const params: (string | number)[] = [lookupName];
+    if (options.kinds && options.kinds.length > 0) {
+      sql += ` AND nodes.kind IN (${options.kinds.map(() => '?').join(',')})`;
+      params.push(...options.kinds);
+    }
+    if (options.languages && options.languages.length > 0) {
+      sql += ` AND nodes.language IN (${options.languages.map(() => '?').join(',')})`;
+      params.push(...options.languages);
+    }
+    if (kind === 'qualified') {
+      sql += ' AND (lower(nodes.qualified_name) = ? OR lower(nodes.qualified_name) LIKE ?)';
+      params.push(normalized, `%::${normalized}`);
+    }
+    sql = this.appendTargetScope(sql, params, options.targetPath, options.includeDeps);
+    sql = this.appendAllowedFilePaths(sql, params, options.allowedFilePaths);
+    sql += ' ORDER BY nodes.file_path, nodes.start_line LIMIT ?';
+    params.push(cap + 1);
+
+    const rows = this.db.prepare(sql).all(...params) as NodeRow[];
+    const candidates = rows.slice(0, cap).map((row): SymbolResolution['candidates'][number] => {
+      const node = rowToNode(row);
+      return {
+        nodeId: node.id,
+        filePath: node.filePath,
+        name: node.name,
+        qualifiedName: node.qualifiedName,
+        kind: node.kind,
+        startLine: node.startLine,
+        endLine: node.endLine,
+      };
+    });
+    const truncated = rows.length > cap;
+    return {
+      raw,
+      normalized,
+      kind,
+      status: candidates.length === 0 ? 'zero' : candidates.length === 1 && !truncated ? 'one' : 'many',
+      candidates,
+      truncated,
+    };
+  }
+
   /**
    * Nodes whose name starts with `prefix`, by index range scan (a LIKE would
    * skip idx_nodes_name under SQLite's default case-insensitive LIKE).
@@ -1976,14 +2044,14 @@ export class QueryBuilder {
 
     // First try FTS5 with prefix matching (skip if FTS5 not available, #1532)
     let results = text
-      ? (this._fts5Available !== false ? this.searchNodesFTS(text, { kinds, languages, targetPath: options.targetPath, includeDeps: options.includeDeps, limit, offset }, filters) : [])
+      ? (this._fts5Available !== false ? this.searchNodesFTS(text, { kinds, languages, targetPath: options.targetPath, includeDeps: options.includeDeps, allowedFilePaths: options.allowedFilePaths, limit, offset }, filters) : [])
       // Over-fetch by 5× when running filter-only (no text): the pool is
       // re-ranked below, and the extra rows give that ranking room to work.
-      : this.searchAllByFilters({ kinds, languages, targetPath: options.targetPath, includeDeps: options.includeDeps, limit: limit * 5, offset }, filters);
+      : this.searchAllByFilters({ kinds, languages, targetPath: options.targetPath, includeDeps: options.includeDeps, allowedFilePaths: options.allowedFilePaths, limit: limit * 5, offset }, filters);
 
     // If no FTS results, try LIKE-based substring search
     if (results.length === 0 && text.length >= 2) {
-      results = this.searchNodesLike(text, { kinds, languages, targetPath: options.targetPath, includeDeps: options.includeDeps, limit, offset }, filters);
+      results = this.searchNodesLike(text, { kinds, languages, targetPath: options.targetPath, includeDeps: options.includeDeps, allowedFilePaths: options.allowedFilePaths, limit, offset }, filters);
     }
 
     // Final fuzzy fallback: scan all known names and keep those within
@@ -1991,7 +2059,7 @@ export class QueryBuilder {
     // returned nothing AND there's a text portion long enough to be
     // worth fuzzing (1-char queries would match too much).
     if (results.length === 0 && text.length >= 3) {
-      results = this.searchNodesFuzzy(text, { kinds, languages, targetPath: options.targetPath, includeDeps: options.includeDeps, limit }, filters);
+      results = this.searchNodesFuzzy(text, { kinds, languages, targetPath: options.targetPath, includeDeps: options.includeDeps, allowedFilePaths: options.allowedFilePaths, limit }, filters);
     }
 
     // Supplement: ensure exact name matches are always candidates.
@@ -2029,6 +2097,7 @@ export class QueryBuilder {
           params.push(...languages);
         }
         sql = this.appendTargetScope(sql, params, options.targetPath, options.includeDeps);
+        sql = this.appendAllowedFilePaths(sql, params, options.allowedFilePaths);
         if (filters) sql += fieldFilterSql(filters, params);
         sql += ` ORDER BY ${this.targetOrderClause(params, options.targetPath, options.includeDeps, 'nodes.id')}`;
         const rows = filters
@@ -2122,10 +2191,10 @@ export class QueryBuilder {
    * filters let through when there are any.
    */
   private searchAllByFilters(
-    options: { kinds?: NodeKind[]; languages?: Language[]; targetPath?: string; includeDeps?: boolean; limit: number; offset: number },
+    options: { kinds?: NodeKind[]; languages?: Language[]; targetPath?: string; includeDeps?: boolean; allowedFilePaths?: readonly string[]; limit: number; offset: number },
     filters?: FieldFilters,
   ): SearchResult[] {
-    const { kinds, languages, targetPath, includeDeps, limit, offset } = options;
+    const { kinds, languages, targetPath, includeDeps, allowedFilePaths, limit, offset } = options;
     let sql = 'SELECT * FROM nodes WHERE 1=1';
     const params: (string | number)[] = [];
     if (kinds && kinds.length > 0) {
@@ -2137,6 +2206,7 @@ export class QueryBuilder {
       params.push(...languages);
     }
     sql = this.appendTargetScope(sql, params, targetPath, includeDeps);
+    sql = this.appendAllowedFilePaths(sql, params, allowedFilePaths);
     if (filters) sql += fieldFilterSql(filters, params);
     sql += ` ORDER BY ${this.targetOrderClause(params, targetPath, includeDeps, 'name')}`;
     const rows = filters
@@ -2155,10 +2225,10 @@ export class QueryBuilder {
    */
   private searchNodesFuzzy(
     text: string,
-    options: { kinds?: NodeKind[]; languages?: Language[]; targetPath?: string; includeDeps?: boolean; limit: number },
+    options: { kinds?: NodeKind[]; languages?: Language[]; targetPath?: string; includeDeps?: boolean; allowedFilePaths?: readonly string[]; limit: number },
     filters?: FieldFilters,
   ): SearchResult[] {
-    const { kinds, languages, targetPath, includeDeps, limit } = options;
+    const { kinds, languages, targetPath, includeDeps, allowedFilePaths, limit } = options;
     const searchLimit = targetPath !== undefined && includeDeps ? Math.max(limit * 5, 100) : limit;
     const lowered = text.toLowerCase();
     const maxDist = lowered.length <= 4 ? 1 : 2;
@@ -2208,6 +2278,7 @@ export class QueryBuilder {
         params.push(...languages);
       }
       sql = this.appendTargetScope(sql, params, targetPath, includeDeps);
+      sql = this.appendAllowedFilePaths(sql, params, allowedFilePaths);
       if (filters) sql += fieldFilterSql(filters, params);
       sql += ` ORDER BY ${this.targetOrderClause(params, targetPath, includeDeps, 'nodes.id')}`;
       const rows = filters
@@ -2313,6 +2384,7 @@ export class QueryBuilder {
    */
   private searchNodesFTS(query: string, options: SearchOptions, filters?: FieldFilters): SearchResult[] {
     const { kinds, languages, targetPath, includeDeps, limit = 100, offset = 0 } = options;
+    const { allowedFilePaths } = options;
 
     // Add prefix wildcard for better matching (e.g., "auth" matches "AuthService", "authenticate")
     // Escape special FTS5 characters and add prefix wildcard.
@@ -2375,6 +2447,7 @@ export class QueryBuilder {
     }
 
     sql = this.appendTargetScope(sql, params, targetPath, includeDeps);
+    sql = this.appendAllowedFilePaths(sql, params, allowedFilePaths);
     if (filters) sql += fieldFilterSql(filters, params);
     sql += ` ORDER BY ${this.targetOrderClause(params, targetPath, includeDeps, 'score')}`;
 
@@ -2403,6 +2476,7 @@ export class QueryBuilder {
    */
   private searchNodesLike(query: string, options: SearchOptions, filters?: FieldFilters): SearchResult[] {
     const { kinds, languages, targetPath, includeDeps, limit = 100, offset = 0 } = options;
+    const { allowedFilePaths } = options;
 
     // This runs when FTS found nothing, and a word FTS can't find is usually
     // in no name at all: most words of a pasted log or document. Each scan
@@ -2462,6 +2536,7 @@ export class QueryBuilder {
     }
 
     sql = this.appendTargetScope(sql, params, targetPath, includeDeps);
+    sql = this.appendAllowedFilePaths(sql, params, allowedFilePaths);
     if (filters) sql += fieldFilterSql(filters, params);
     sql += ` ORDER BY ${this.targetOrderClause(params, targetPath, includeDeps, 'score DESC, length(name) ASC')}`;
 
@@ -2493,7 +2568,7 @@ export class QueryBuilder {
   findNodesByExactName(names: string[], options: SearchOptions = {}): SearchResult[] {
     if (names.length === 0) return [];
 
-    const { kinds, languages, targetPath, includeDeps, limit = 50 } = options;
+    const { kinds, languages, targetPath, includeDeps, limit = 50, allowedFilePaths } = options;
 
     // Two-pass approach to handle common names (e.g., "run" has 40+ matches):
     // Pass 1: Find which files contain distinctive (rare) symbols from the query.
@@ -2516,6 +2591,7 @@ export class QueryBuilder {
         params.push(...kinds);
       }
       sql = this.appendTargetScope(sql, params, targetPath, includeDeps);
+      sql = this.appendAllowedFilePaths(sql, params, allowedFilePaths);
       sql += ` ORDER BY ${this.targetOrderClause(params, targetPath, includeDeps, 'file_path')} LIMIT 100`;
       const rows = this.db.prepare(sql).all(...params) as { file_path: string }[];
       nameToFiles.set(name.toLowerCase(), new Set(rows.map(r => r.file_path)));
@@ -2553,6 +2629,7 @@ export class QueryBuilder {
       }
 
       sql = this.appendTargetScope(sql, params, targetPath, includeDeps);
+      sql = this.appendAllowedFilePaths(sql, params, allowedFilePaths);
 
       // Fetch enough to find co-located results among common names
       sql += ` ORDER BY ${this.targetOrderClause(params, targetPath, includeDeps, 'nodes.id')} LIMIT ?`;
@@ -2592,7 +2669,7 @@ export class QueryBuilder {
     substring: string,
     options: SearchOptions & { excludePrefix?: boolean } = {}
   ): SearchResult[] {
-    const { kinds, languages, targetPath, includeDeps, limit = 30, excludePrefix } = options;
+    const { kinds, languages, targetPath, includeDeps, limit = 30, excludePrefix, allowedFilePaths } = options;
 
     let sql = `
       SELECT nodes.*, 1.0 as score
@@ -2618,6 +2695,7 @@ export class QueryBuilder {
     }
 
     sql = this.appendTargetScope(sql, params, targetPath, includeDeps);
+    sql = this.appendAllowedFilePaths(sql, params, allowedFilePaths);
 
     sql += ` ORDER BY ${this.targetOrderClause(params, targetPath, includeDeps, 'length(name) ASC')} LIMIT ?`;
     params.push(includeDeps && targetPath !== undefined ? Math.max(limit * 5, 60) : limit);

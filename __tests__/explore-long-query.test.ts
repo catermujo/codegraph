@@ -266,8 +266,11 @@ describe('a long query searches a bounded number of words (#2620)', () => {
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  async function setup(): Promise<CodeGraph> {
+  async function setup(classes: readonly string[] = []): Promise<CodeGraph> {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cg-longquery-'));
+    if (classes.length > 0) {
+      fs.writeFileSync(path.join(dir, 'auth.ts'), classes.map((name) => `export class ${name} {}`).join('\n') + '\n');
+    }
     fs.writeFileSync(path.join(dir, 'orders.ts'), [
       'export class OrderStateMachine {',
       '  submitOrder(): boolean { return this.transition("submitted"); }',
@@ -301,7 +304,11 @@ describe('a long query searches a bounded number of words (#2620)', () => {
   });
 
   it('searches a bag of symbol names whole', async () => {
-    const cg = await setup();
+    // The names exist: an identifier the index lacks is an exact anchor that fails closed
+    // (anchor-gate.test.ts) and is never searched.
+    const cg = await setup(['AuthService', 'AuthController', 'TokenStore', 'SessionManager', 'UserRepository',
+      'PasswordHasher', 'JwtStrategy', 'RefreshTokenService', 'LoginHandler', 'LogoutHandler', 'AuthGuard',
+      'RolesGuard', 'PermissionService', 'AuditLogger', 'RateLimiter', 'CsrfMiddleware']);
     const search = vi.spyOn(queriesOf(cg), 'searchNodes');
     const bag = 'AuthService AuthController TokenStore SessionManager UserRepository PasswordHasher JwtStrategy '
       + 'RefreshTokenService LoginHandler LogoutHandler AuthGuard RolesGuard PermissionService AuditLogger '

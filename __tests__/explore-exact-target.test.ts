@@ -235,15 +235,17 @@ class IExact:
     return result.content?.[0]?.text ?? '';
   };
 
-  it('fixture sanity: the flow runs as_sql → pre_sql_setup → setup_query → get_select and compiler.py goes focused', async () => {
+  it('fixture sanity: the flow runs as_sql → pre_sql_setup → setup_query → get_select and compiler.py keeps every flow body', async () => {
     const text = await explore('SQLCompiler.as_sql pre_sql_setup get_select');
     expect(text).toContain('**Flow (call path among the symbols you queried)');
     // Through every symbol the query names (#2970), as on django itself: the
     // shorter route through the unnamed `get_qualify_sql` skipped `pre_sql_setup`.
-    // The named and spine bodies outgrow compiler.py's share, as django's do
-    // (18,390 chars against 8,895), which is what makes it a per-symbol view.
     expect(text).toMatch(/1\. as_sql \(compiler\.py:\d+\)[\s\S]*2\. pre_sql_setup[\s\S]*3\. setup_query[\s\S]*4\. get_select/);
-    expect(sectionFor(text, COMPILER), 'the family file renders as a per-symbol view').toContain('· focused');
+    // Fork rule: anchored retrieval drops weak query words, so the named family file keeps
+    // a larger share and renders as source with every flow body, not as a per-symbol view.
+    const compiler = sectionFor(text, COMPILER);
+    for (const def of ['def as_sql', 'def pre_sql_setup', 'def setup_query', 'def get_select']) expect(compiler).toContain(def);
+    expect(compiler).not.toContain('· focused');
   });
 
   it('returns the qualified method\'s WHOLE body, not its signature line', async () => {

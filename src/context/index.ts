@@ -19,6 +19,8 @@ import {
   BuildContextOptions,
   FindRelevantContextOptions,
   SearchResult,
+  SymbolAnchorKind,
+  SymbolResolution,
 } from '../types';
 import { QueryBuilder } from '../db/queries';
 import { GraphTraverser } from '../graph';
@@ -29,6 +31,7 @@ import {
   isTestFile, extractSearchTerms, scorePathRelevance, getStemVariants, isDistinctiveIdentifier,
   blankNonAsciiWords, splitAtCjkSwitches, meetsQueryWordFloor,
 } from '../search/query-utils';
+import { splitIdentifierSegments } from '../search/identifier-segments';
 import { LOW_CONFIDENCE_MARKER } from './markers';
 import { findNamedCopybooks, isCopybookInclude } from '../graph/cobol-copybooks';
 import { describeSynthesizedHop } from '../graph/synthesized-hop';
@@ -175,6 +178,34 @@ export function extractSymbolsFromQuery(query: string): string[] {
   ]);
 
   return Array.from(symbols).filter(s => !commonWords.has(s.toLowerCase()));
+}
+
+interface RequiredSymbolAnchor {
+  raw: string;
+  normalized: string;
+  kind: SymbolAnchorKind;
+}
+
+/** Keep only identifier-shaped tokens; prose remains on the fuzzy path. */
+function extractRequiredSymbolAnchors(query: string): RequiredSymbolAnchor[] {
+  const anchors = new Map<string, RequiredSymbolAnchor>();
+  const tokens = query.split(/[\s,()[\]]+/).filter(Boolean);
+  for (const token of tokens) {
+    if (token.length < 3 || !/^[A-Za-z_$][\w$]*(?:(?:::|\.)[\w$]+)*$/.test(token)) continue;
+    const qualified = /::|\./.test(token);
+    const distinctive = qualified || /[_0-9]/.test(token) || /[a-z][A-Z]/.test(token)
+      || /^[A-Z]{2,}$/.test(token);
+    if (!distinctive) continue;
+    const normalized = qualified
+      ? token.split(/::|\./).filter(Boolean).join('::').toLowerCase()
+      : token.toLowerCase();
+    anchors.set(`${qualified ? 'qualified' : 'identifier'}:${normalized}`, {
+      raw: token,
+      normalized,
+      kind: qualified ? 'qualified' : 'identifier',
+    });
+  }
+  return [...anchors.values()];
 }
 
 /**
@@ -510,11 +541,21 @@ export class ContextBuilder {
       ? undefined
       : new Set(this.queries.getMonorepoTargetFilesForScope(opts.targetPath, opts.includeDeps));
     const targetFilePaths = targetFiles ? [...targetFiles] : undefined;
+    const allowedFiles = opts.allowedFilePaths === undefined ? undefined : new Set(opts.allowedFilePaths);
+    const scopedFiles = targetFiles === undefined
+      ? allowedFiles
+      : allowedFiles === undefined
+        ? targetFiles
+        : new Set([...targetFiles].filter((filePath) => allowedFiles.has(filePath)));
 
     // Start with empty subgraph
     const nodes = new Map<string, Node>();
     const edges: Edge[] = [];
     const roots: string[] = [];
+
+    if (allowedFiles !== undefined && scopedFiles?.size === 0) {
+      return { nodes, edges, roots };
+    }
 
     // Handle empty query - return empty subgraph
     if (!query || query.trim().length === 0) {
@@ -526,18 +567,92 @@ export class ContextBuilder {
     // Step 1: Extract potential symbol names from query
     const symbolsFromQuery = extractSymbolsFromQuery(query).slice(0, MAX_QUERY_SYMBOLS);
     logDebug('Extracted symbols from query', { query, symbols: symbolsFromQuery });
+    const requiredAnchors = extractRequiredSymbolAnchors(query);
+    const symbolResolutions: SymbolResolution[] = requiredAnchors.map((anchor) =>
+      this.queries.resolveExactSymbol(anchor.raw, anchor.kind, {
+        targetPath: opts.targetPath,
+        includeDeps: opts.includeDeps,
+        allowedFilePaths: opts.allowedFilePaths,
+      })
+    );
+    const requiredNodes = new Map<string, Node>();
+    for (const resolution of symbolResolutions) {
+      if (resolution.status !== 'one'
+        && !(resolution.status === 'many' && !resolution.truncated && resolution.candidates.length <= opts.maxNodes)) {
+        continue;
+      }
+      for (const candidate of resolution.candidates) {
+        const node = this.queries.getNodeById(candidate.nodeId);
+        if (node && (!opts.nodeKinds?.length || opts.nodeKinds.includes(node.kind))) requiredNodes.set(node.id, node);
+      }
+    }
+    const suppressedAnchors = new Set(
+      requiredAnchors.filter((anchor) => {
+        const resolution = symbolResolutions.find((entry) => entry.raw === anchor.raw);
+        return anchor.kind === 'qualified' || resolution?.status !== 'one';
+      }),
+    );
+    const anchoredTerms = new Set(
+      [...suppressedAnchors].flatMap((anchor) => anchor.raw.split(/::|\./).map((part) => part.toLowerCase())),
+    );
+    const blockedTerms = new Set(
+      [...suppressedAnchors].flatMap((anchor) => [
+        ...anchor.raw.split(/::|\./).map((part) => part.toLowerCase()),
+        ...extractSearchTerms(anchor.raw, { stems: false }),
+      ]),
+    );
+    // DUMBAI: Segment-vocab names are residual-query evidence, not exact-anchor
+    // evidence. Keep relatives such as SmallManyExtra from re-entering through
+    // that channel while preserving independently supplied seed names.
+    const requiredSeedPrefixes = requiredAnchors
+      .filter((anchor) => symbolResolutions.find((entry) => entry.raw === anchor.raw)?.status === 'many')
+      .map((anchor) => splitIdentifierSegments(anchor.raw.split(/::|\./).filter(Boolean).pop() ?? anchor.raw))
+      .filter((segments) => segments.length > 0);
+    const isExactAnchorRelative = (name: string): boolean => {
+      const segments = splitIdentifierSegments(name);
+      return requiredSeedPrefixes.some((prefix) =>
+        segments.length > prefix.length
+        && prefix.every((segment, index) => segments[index] === segment));
+    };
+    const residualSymbols = symbolsFromQuery.filter((symbol) => !anchoredTerms.has(symbol.toLowerCase()));
+    const residualSeedNames = opts.seedNames.filter((name) =>
+      !blockedTerms.has(name.toLowerCase()) && !isExactAnchorRelative(name));
+    // DUMBAI: Lower-leading camel tokens are also commonly object fields. When
+    // their exact lookup is zero, retain only the existing camel-infix recovery
+    // (never a prefix match), while PascalCase/snake/qualified anchors stay
+    // fail-closed and exact-family relatives remain excluded.
+    const camelBoundarySymbols = [
+      ...residualSymbols,
+      ...requiredAnchors
+        .filter((anchor) => {
+          const resolution = symbolResolutions.find((entry) => entry.raw === anchor.raw);
+          return resolution?.status === 'zero'
+            && /^[a-z][A-Za-z0-9]*[a-z][A-Z]/.test(anchor.raw);
+        })
+        .map((anchor) => anchor.raw),
+    ];
+    const blockedRelativePrefixes = requiredAnchors
+      .map((anchor) => splitIdentifierSegments(anchor.raw.split(/::|\./).filter(Boolean).pop() ?? anchor.raw))
+      .filter((segments) => segments.length > 0);
+    const isBlockedRequiredRelative = (node: Node): boolean => {
+      const segments = splitIdentifierSegments(node.name);
+      return blockedRelativePrefixes.some((prefix) =>
+        segments.length > prefix.length
+        && prefix.every((segment, index) => segments[index] === segment));
+    };
 
     // Step 2: Look up exact matches for extracted symbols
     let exactMatches: SearchResult[] = [];
-    if (symbolsFromQuery.length > 0 || opts.seedNames.length > 0) {
+    if (residualSymbols.length > 0 || residualSeedNames.length > 0) {
       try {
-        if (symbolsFromQuery.length > 0) {
+        if (residualSymbols.length > 0) {
           // Get more results so we can apply co-location boosting before trimming
-          exactMatches = this.queries.findNodesByExactName(symbolsFromQuery, {
+          exactMatches = this.queries.findNodesByExactName(residualSymbols, {
             limit: Math.ceil(opts.searchLimit * 5),
             kinds: opts.nodeKinds && opts.nodeKinds.length > 0 ? opts.nodeKinds : undefined,
             targetPath: opts.targetPath,
             includeDeps: opts.includeDeps,
+            allowedFilePaths: opts.allowedFilePaths,
           });
         }
 
@@ -549,12 +664,13 @@ export class ContextBuilder {
         // BEFORE the co-location boost below, because several seeds landing
         // in one file (pinFeedIfNearBottom + feedAtBottom + handleFeedScroll)
         // is exactly the evidence that file is the answer.
-        if (opts.seedNames.length > 0) {
-          const seedResults = this.queries.findNodesByExactName(opts.seedNames, {
+        if (residualSeedNames.length > 0) {
+          const seedResults = this.queries.findNodesByExactName(residualSeedNames, {
             limit: Math.ceil(opts.searchLimit * 3),
             kinds: opts.nodeKinds && opts.nodeKinds.length > 0 ? opts.nodeKinds : undefined,
             targetPath: opts.targetPath,
             includeDeps: opts.includeDeps,
+            allowedFilePaths: opts.allowedFilePaths,
           });
           const known = new Set(exactMatches.map((r) => r.node.id));
           for (const r of seedResults) {
@@ -562,7 +678,7 @@ export class ContextBuilder {
             known.add(r.node.id);
             exactMatches.push({ ...r, score: r.score * 0.6 });
           }
-          logDebug('Segment seed matches', { seedNames: opts.seedNames, added: known.size });
+          logDebug('Segment seed matches', { seedNames: residualSeedNames, added: known.size });
         }
 
         // Co-location boost: when multiple extracted symbols appear in the same file,
@@ -599,12 +715,12 @@ export class ContextBuilder {
     // When the user writes "REST", "bulk", or "allocation", they usually mean classes
     // like RestController, BulkRequest, AllocationService — not nodes named exactly that.
     // Also tries stem variants: "caching" → "cache" finds Cache, CacheBuilder.
-    if (symbolsFromQuery.length > 0) {
+    if (residualSymbols.length > 0) {
       const definitionKinds: NodeKind[] = ['class', 'interface', 'struct', 'union', 'trait',
         'protocol', 'enum', 'type_alias'];
       // Expand symbols with stem variants for broader definition matching
-      const expandedSymbols = new Set(symbolsFromQuery);
-      for (const sym of symbolsFromQuery) {
+      const expandedSymbols = new Set(residualSymbols);
+      for (const sym of residualSymbols) {
         for (const variant of getStemVariants(sym)) {
           expandedSymbols.add(variant);
         }
@@ -619,6 +735,7 @@ export class ContextBuilder {
           kinds: definitionKinds,
           targetPath: opts.targetPath,
           includeDeps: opts.includeDeps,
+          allowedFilePaths: opts.allowedFilePaths,
         });
         const matched: SearchResult[] = [];
         for (const r of prefixResults) {
@@ -696,7 +813,7 @@ export class ContextBuilder {
       // fell through to the fuzzy fallback and returned whatever program name
       // sat within edit distance (`CVACT01Y` → `CBACT01C`).
       const searchTerms = extractSearchTerms(query)
-        .filter((term) => !copybooks.members.has(term.toUpperCase()))
+        .filter((term) => !copybooks.members.has(term.toUpperCase()) && !blockedTerms.has(term))
         .slice(0, MAX_QUERY_TERMS);
       if (searchTerms.length > 0) {
         // Search each term individually to get broader coverage,
@@ -717,6 +834,7 @@ export class ContextBuilder {
             kinds: searchKinds,
             targetPath: opts.targetPath,
             includeDeps: opts.includeDeps,
+            allowedFilePaths: opts.allowedFilePaths,
           });
           for (const r of termResults) {
             const existing = termResultsMap.get(r.node.id);
@@ -819,7 +937,7 @@ export class ContextBuilder {
     // than nodes matching just one generic term. Without this, "ExecutionUtils"
     // (matches only "execution") fills budget slots meant for "ShardSearchRequest"
     // (matches "shard" + "search" + "request").
-    const queryTermsForBoost = extractSearchTerms(query).slice(0, MAX_QUERY_TERMS);
+    const queryTermsForBoost = extractSearchTerms(query).filter((term) => !blockedTerms.has(term)).slice(0, MAX_QUERY_TERMS);
     if (queryTermsForBoost.length >= 2) {
       // Group terms that are substrings of each other (stem variants of the same
       // root word). "indexed", "indexe", "index" should count as ONE concept match,
@@ -855,7 +973,7 @@ export class ContextBuilder {
       // of a prose query with zero corroboration from any other term. Classify by
       // the QUERY token (what the user typed), not the matched symbol's name.
       const distinctiveTokens = new Set(
-        symbolsFromQuery.filter(isDistinctiveIdentifier).map(s => s.toLowerCase())
+        residualSymbols.filter(isDistinctiveIdentifier).map(s => s.toLowerCase())
       );
       const distinctiveExactMatchIds = new Set(
         exactMatches
@@ -903,7 +1021,7 @@ export class ContextBuilder {
     // FTS can't find "Search" inside "TransportSearchAction" (one FTS token).
     // LIKE reliably finds these substring matches. Results are appended with
     // guaranteed slots so they don't compete with higher-scoring prefix matches.
-    if (symbolsFromQuery.length > 0) {
+    if (camelBoundarySymbols.length > 0) {
       const camelDefinitionKinds: NodeKind[] = ['class', 'interface', 'struct', 'union', 'trait',
         'protocol', 'enum', 'type_alias'];
       // Callable kinds participate too: in service-layer codebases the
@@ -931,7 +1049,7 @@ export class ContextBuilder {
       const camelNodeTerms = new Map<string, { result: SearchResult; termCount: number }>();
       const maxCamelPerTerm = Math.ceil(opts.searchLimit / 2);
 
-      for (const sym of symbolsFromQuery) {
+      for (const sym of camelBoundarySymbols) {
         const titleCased = sym.charAt(0).toUpperCase() + sym.slice(1).toLowerCase();
         if (titleCased.length < 3) continue;
         const termKey = titleCased.toLowerCase();
@@ -949,6 +1067,7 @@ export class ContextBuilder {
             excludePrefix: true,
             targetPath: opts.targetPath,
             includeDeps: opts.includeDeps,
+            allowedFilePaths: opts.allowedFilePaths,
           }),
           ...this.queries.findNodesByNameSubstring(titleCased, {
             limit: 200,
@@ -956,6 +1075,7 @@ export class ContextBuilder {
             excludePrefix: true,
             targetPath: opts.targetPath,
             includeDeps: opts.includeDeps,
+            allowedFilePaths: opts.allowedFilePaths,
           }),
         ];
 
@@ -1027,11 +1147,11 @@ export class ContextBuilder {
       // START with a query term (e.g., "SearchShardsRequest" starts with "Search").
       // For multi-word queries, a class matching multiple query terms in its name
       // is almost certainly relevant regardless of position.
-      if (symbolsFromQuery.length >= 2) {
+      if (residualSymbols.length >= 2) {
         // Collect ALL LIKE results per term (reusing findNodesByNameSubstring)
         // but without the CamelCase boundary or prefix exclusion filters.
         const compoundTermMap = new Map<string, { node: Node; terms: Set<string> }>();
-        for (const sym of symbolsFromQuery) {
+        for (const sym of residualSymbols) {
           const titleCased = sym.charAt(0).toUpperCase() + sym.slice(1).toLowerCase();
           if (titleCased.length < 3) continue;
 
@@ -1042,6 +1162,7 @@ export class ContextBuilder {
               excludePrefix: false,
               targetPath: opts.targetPath,
               includeDeps: opts.includeDeps,
+              allowedFilePaths: opts.allowedFilePaths,
             }),
             // Same separate callable batch as Step 5b (#1196).
             ...this.queries.findNodesByNameSubstring(titleCased, {
@@ -1050,6 +1171,7 @@ export class ContextBuilder {
               excludePrefix: false,
               targetPath: opts.targetPath,
               includeDeps: opts.includeDeps,
+              allowedFilePaths: opts.allowedFilePaths,
             }),
           ];
 
@@ -1086,6 +1208,13 @@ export class ContextBuilder {
       }
     }
 
+    const blockedNodeNames = new Set(
+      [...suppressedAnchors].map((anchor) => anchor.raw.split(/::|\./).filter(Boolean).pop()!.toLowerCase()),
+    );
+    searchResults = searchResults.filter((result) =>
+      !blockedNodeNames.has(result.node.name.toLowerCase())
+      && !isBlockedRequiredRelative(result.node));
+
     // Final sort and truncation — all search channels (exact, text, CamelCase,
     // compound) have now contributed. Sort by score so multi-term matches from
     // later steps can outrank dampened single-term matches from earlier steps.
@@ -1098,8 +1227,8 @@ export class ContextBuilder {
     // Resolve imports/exports to their actual definitions
     // If someone searches "terminal" and finds `import { TerminalPanel }`,
     // they want the TerminalPanel class, not the import statement
-    filteredResults = this.resolveImportsToDefinitions(filteredResults)
-      .filter((result) => targetFiles === undefined || targetFiles.has(result.node.filePath));
+    filteredResults = this.resolveImportsToDefinitions(filteredResults, scopedFiles)
+      .filter((result) => scopedFiles === undefined || scopedFiles.has(result.node.filePath));
 
     // An exact filename is the query's requested entry point. Keep it ahead of
     // broader text matches before applying the entry-point cap.
@@ -1151,10 +1280,11 @@ export class ContextBuilder {
     // Single-keyword and symbol-name queries are exempt (their single match IS the
     // answer), so the handoff never fires on them.
     let confidence: 'high' | 'low' = 'high';
-    const confTerms = extractSearchTerms(query, { stems: false }).filter(t => t.length >= 3);
+    const confTerms = extractSearchTerms(query, { stems: false })
+      .filter((term) => term.length >= 3 && !blockedTerms.has(term));
     if (confTerms.length >= 2 && filteredResults.length > 0) {
       const distinctive = new Set(
-        symbolsFromQuery.filter(isDistinctiveIdentifier).map(s => s.toLowerCase())
+      residualSymbols.filter(isDistinctiveIdentifier).map(s => s.toLowerCase())
       );
       const anyStrong = filteredResults.some(r => {
         // A copybook the query named is an exact identifier match, not prose.
@@ -1179,6 +1309,13 @@ export class ContextBuilder {
       roots.push(result.node.id);
     }
 
+    // Required unique anchors bypass the ordinary entry-point limit. Their exact
+    // identity is part of the request, so score-based selection cannot discard it.
+    for (const node of requiredNodes.values()) {
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      if (!roots.includes(node.id)) roots.push(node.id);
+    }
+
     // Expand type hierarchy for class/interface entry points.
     // BFS often exhausts its per-entry-point budget on contained methods
     // before reaching extends/implements neighbors. This dedicated step
@@ -1194,7 +1331,7 @@ export class ContextBuilder {
         // The budget holds per node: a widely implemented interface brings
         // its whole descendant tree (IDisposable: hundreds of types).
         for (const [id, node] of hierarchy.nodes) {
-          if (!nodes.has(id) && hierarchyNodesAdded < maxHierarchyNodes && (targetFiles === undefined || targetFiles.has(node.filePath))) {
+          if (!nodes.has(id) && hierarchyNodesAdded < maxHierarchyNodes && (scopedFiles === undefined || scopedFiles.has(node.filePath))) {
             nodes.set(id, node);
             hierarchyNodesAdded++;
           }
@@ -1222,7 +1359,7 @@ export class ContextBuilder {
         const siblingHierarchy = this.traverser.getTypeHierarchy(candidate.id);
         for (const [id, node] of siblingHierarchy.nodes) {
           if (!nodes.has(id)
-            && (targetFiles === undefined || targetFiles.has(node.filePath))
+            && (scopedFiles === undefined || scopedFiles.has(node.filePath))
             && hierarchyNodesAdded < maxHierarchyNodes) {
             nodes.set(id, node);
             hierarchyNodesAdded++;
@@ -1248,20 +1385,21 @@ export class ContextBuilder {
         maxDepth: opts.traversalDepth,
         edgeKinds: opts.edgeKinds && opts.edgeKinds.length > 0 ? opts.edgeKinds : undefined,
         nodeKinds: opts.nodeKinds && opts.nodeKinds.length > 0 ? opts.nodeKinds : undefined,
-        filePaths: targetFilePaths ?? [],
+        filePaths: (scopedFiles === undefined ? targetFilePaths : [...scopedFiles]) ?? [],
         direction: 'both',
         limit: Math.ceil(opts.maxNodes / Math.max(1, filteredResults.length)),
       });
 
       // Merge nodes
       for (const [id, node] of traversalResult.nodes) {
-        if (!nodes.has(id)) {
+        if (!nodes.has(id) && (scopedFiles === undefined || scopedFiles.has(node.filePath))) {
           nodes.set(id, node);
         }
       }
 
       // Merge edges (avoid duplicates)
       for (const edge of traversalResult.edges) {
+        if (scopedFiles !== undefined && (!nodes.has(edge.source) || !nodes.has(edge.target))) continue;
         const exists = edges.some(
           (e) => e.source === edge.source && e.target === edge.target && e.kind === edge.kind
         );
@@ -1337,7 +1475,10 @@ export class ContextBuilder {
         return (bRoot + bKind) - (aRoot + aKind);
       });
       // Remove excess nodes (keep the highest-priority ones)
-      for (const id of nodeIds.slice(maxPerFile)) {
+      const removable = nodeIds.filter((id) => !requiredNodes.has(id));
+      const requiredCount = nodeIds.filter((id) => requiredNodes.has(id)).length;
+      const removableStart = Math.max(0, maxPerFile - requiredCount);
+      for (const id of removable.slice(removableStart)) {
         finalNodes.delete(id);
       }
     }
@@ -1350,7 +1491,7 @@ export class ContextBuilder {
       const maxNonProd = Math.max(3, Math.ceil(opts.maxNodes * 0.15));
       const nonProdIds: string[] = [];
       for (const [id, node] of finalNodes) {
-        if (isTestFile(node.filePath)) {
+        if (isTestFile(node.filePath) && !requiredNodes.has(id)) {
           nonProdIds.push(id);
         }
       }
@@ -1387,15 +1528,15 @@ export class ContextBuilder {
       }
     }
 
-    if (targetFiles !== undefined) {
+    if (scopedFiles !== undefined) {
       for (const [id, node] of finalNodes) {
-        if (!targetFiles.has(node.filePath)) finalNodes.delete(id);
+        if (!scopedFiles.has(node.filePath)) finalNodes.delete(id);
       }
       roots.splice(0, roots.length, ...roots.filter((id) => finalNodes.has(id)));
       finalEdges = finalEdges.filter((edge) => finalNodes.has(edge.source) && finalNodes.has(edge.target));
     }
 
-    return { nodes: finalNodes, edges: finalEdges, roots, confidence };
+    return { nodes: finalNodes, edges: finalEdges, roots, confidence, symbolResolutions };
   }
 
   /**
@@ -1603,7 +1744,7 @@ export class ContextBuilder {
    * @param results - Search results that may include import/export nodes
    * @returns Results with imports resolved to definitions where possible
    */
-  private resolveImportsToDefinitions(results: SearchResult[]): SearchResult[] {
+  private resolveImportsToDefinitions(results: SearchResult[], scopedFiles?: ReadonlySet<string>): SearchResult[] {
     const resolved: SearchResult[] = [];
     const seenIds = new Set<string>();
 
@@ -1628,7 +1769,7 @@ export class ContextBuilder {
       let foundDefinition = false;
       for (const edge of outgoingEdges) {
         const targetNode = this.queries.getNodeById(edge.target);
-        if (targetNode && !seenIds.has(targetNode.id)) {
+        if (targetNode && (scopedFiles === undefined || scopedFiles.has(targetNode.filePath)) && !seenIds.has(targetNode.id)) {
           // Found the definition - use it instead of the import
           seenIds.add(targetNode.id);
           resolved.push({

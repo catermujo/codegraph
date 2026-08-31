@@ -92,10 +92,12 @@ export interface ExploreEmission {
   sourceBytes: number;
   /** Total chars of the response the agent received. */
   responseBytes: number;
+  /** Internal final-response anchor accounting; never retained in session state. */
+  coverage?: import('./explore-coverage').ExploreCoverage;
 }
 
 /** A recorded call: an emission plus where it fell in the session. */
-export interface ExploreCallRecord extends ExploreEmission {
+export interface ExploreCallRecord extends Omit<ExploreEmission, 'coverage'> {
   /** 1-based call index within this session FOR THIS PROJECT. Survives eviction. */
   index: number;
 }

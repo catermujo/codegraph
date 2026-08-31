@@ -224,13 +224,13 @@ describe('codegraph_explore — dynamic-dispatch links are listed per link', () 
     const res = await new ToolHandler(cg).execute('codegraph_explore', {
       query: 'Discovery.refresh Refresher.refresh Hcloud.refresh',
     });
+    // Fork rule: an ambiguous family (six `Discovery.refresh` definitions) does not seed the
+    // flow, so its links among themselves are withheld and the picked interface's links remain.
     const links = linkLines(res.content[0].text as string);
-    expect(links).toHaveLength(6);
-    expect(links[0]).toBe('- Refresher.refresh → Hcloud.refresh   [dynamic: interface → impl @hcloud.ts:4]');
-    expect(links[1]).toBe('- Refresher.refresh → Robot.refresh   [dynamic: interface → impl @robot.ts:4]');
-    for (const l of links.slice(2)) {
-      expect(l).toMatch(/^- Discovery\.refresh → Discovery\.refresh {3}\[dynamic: interface → impl @pkg\d\/discovery\.ts:4\]$/);
-    }
+    expect(links).toEqual([
+      '- Refresher.refresh → Hcloud.refresh   [dynamic: interface → impl @hcloud.ts:4]',
+      '- Refresher.refresh → Robot.refresh   [dynamic: interface → impl @robot.ts:4]',
+    ]);
   }, 120_000);
 
   it('lets the named symbols take turns, so one long fan-out does not fill the list', async () => {

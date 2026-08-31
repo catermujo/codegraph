@@ -195,6 +195,8 @@ export interface FlowChain {
 export interface NamedSymbolFlowOptions {
   /** DUMBAI: Restrict token resolution and flow traversal to the selected build target. */
   allowedFiles?: ReadonlySet<string>;
+  blockedSymbols?: ReadonlySet<string>;
+  exactCandidates?: ReadonlyMap<string, readonly Node[]>;
   /** `named` = explore's rules; `directed` = a pinned from → to question. */
   mode?: 'named' | 'directed';
   /** Required in `directed` mode: the token the path must start at. */
@@ -317,7 +319,9 @@ export function resolveNamedTokens(
     );
 
   for (const t of tokens) {
-    const hits = findAllSymbols(cg, t).nodes.filter((node) => opts.allowedFiles === undefined || opts.allowedFiles.has(node.filePath));
+    if (opts.blockedSymbols?.has(t.toLowerCase())) continue;
+    const resolved = opts.exactCandidates?.get(t.toLowerCase());
+    const hits = (resolved === undefined ? findAllSymbols(cg, t).nodes : [...resolved]).filter((node) => opts.allowedFiles === undefined || opts.allowedFiles.has(node.filePath));
     const cands = hits.filter((n) => FLOW_CALLABLE_KINDS.has(n.kind));
     out.tokenFamily.set(t, cands);
     // A qualified or otherwise-specific name (<=3 hits) keeps all of them.
@@ -326,14 +330,14 @@ export function resolveNamedTokens(
     // of overloads that actually connects IS the disambiguation, and co-naming
     // has nothing to work with when the whole query is two words.
     const pick =
-      specific || directed
+      resolved !== undefined || specific || directed
         ? cands
         : cands.filter((n) => {
             const segs = (n.qualifiedName || '').toLowerCase().split(/::|\./).filter(Boolean);
             const container = segs.length >= 2 ? segs[segs.length - 2] : '';
             return !!container && segPool.has(container);
           });
-    const kept = directed
+    const kept = resolved !== undefined ? pick : directed
       ? rankForDirected(pick).slice(0, MAX_CANDIDATES_DIRECTED)
       : pick.slice(0, MAX_CANDIDATES_PER_TOKEN);
     out.tokenNodes.set(

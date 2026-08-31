@@ -102,6 +102,12 @@ import {
   renderOneSymbolAnswer,
   type OneSymbolAnswer,
 } from './explore-one-symbol';
+import {
+  buildExploreCoverage,
+  EXPLORE_COVERAGE_NOTE_MAX,
+  formatExploreCoverage,
+  type ExploreCoverageRenderFact,
+} from './explore-coverage';
 
 /**
  * An expected, recoverable "codegraph can't serve this" condition — most
@@ -3773,7 +3779,7 @@ export class ToolHandler {
    * whose qualifiedName contains another named token (`PmsProductServiceImpl::list`),
    * dropping unrelated `OmsOrderService::list`.
    */
-  private buildFlowFromNamedSymbols(cg: CodeGraph, query: string, targetFiles?: ReadonlySet<string>): { text: string; pathNodeIds: Set<string>; namedNodeIds: Set<string>; uniqueNamedNodeIds: Set<string>; spineCallSites: Map<string, number> } {
+  private buildFlowFromNamedSymbols(cg: CodeGraph, query: string, targetFiles?: ReadonlySet<string>, allowedFiles?: ReadonlySet<string>, blockedSymbols?: ReadonlySet<string>, exactCandidates?: ReadonlyMap<string, readonly Node[]>): { text: string; pathNodeIds: Set<string>; namedNodeIds: Set<string>; uniqueNamedNodeIds: Set<string>; spineCallSites: Map<string, number> } {
     // spineCallSites: for each spine node, the line where it CALLS the next hop —
     // lets the source assembler window an oversize spine method (e.g. n8n's 962-line
     // processRunExecutionData) to the call site instead of dumping the whole body.
@@ -3782,8 +3788,11 @@ export class ToolHandler {
       // Token resolution — parsing, overload disambiguation, the CONSTANT/
       // VARIABLE synth endpoints — is shared with `/api/flow`, so a name written
       // in the viewer's search box resolves to the same nodes it does here.
-      const isInTarget = (node: Node): boolean => targetFiles === undefined || targetFiles.has(node.filePath);
-      const flow = resolveNamedSymbolFlow(cg, query, { allowedFiles: targetFiles });
+      const scopedFiles = allowedFiles === undefined ? targetFiles
+        : targetFiles === undefined ? allowedFiles
+          : new Set([...allowedFiles].filter((file) => targetFiles.has(file)));
+      const isInTarget = (node: Node): boolean => scopedFiles === undefined || scopedFiles.has(node.filePath);
+      const flow = resolveNamedSymbolFlow(cg, query, { allowedFiles: scopedFiles, blockedSymbols, exactCandidates });
       const { named, dynNamed, tokenNodes, tokenFamily, uniqueNamedNodeIds, preciseNamedIds } =
         flow;
       if (flow.tokens.length < 2) return EMPTY;
@@ -3910,7 +3919,7 @@ export class ToolHandler {
         // whole chain; (2) the one resolved callable's body may hold the
         // dynamic-dispatch site that EXPLAINS a half-connected flow.
         const synthLines = collectSynthLinks(null);
-        const boundaries = named.size === 0 ? '' : (this.buildDynamicBoundaries(cg, [...named.values()], named, targetFiles) || '');
+        const boundaries = named.size === 0 ? '' : (this.buildDynamicBoundaries(cg, [...named.values()], named, targetFiles, allowedFiles) || '');
         if (synthLines.length === 0 && !boundaries) return identityOnly();
         const out: string[] = [];
         if (synthLines.length) out.push(
@@ -3958,7 +3967,7 @@ export class ToolHandler {
           if (hasMain) scanList.push(best![best!.length - 1]!.node);
           scanList.push(...uncovered.sort((a, b) =>
             (uniqueNamedNodeIds.has(b.id) ? 1 : 0) - (uniqueNamedNodeIds.has(a.id) ? 1 : 0)));
-          boundaryText = this.buildDynamicBoundaries(cg, scanList, named, targetFiles);
+          boundaryText = this.buildDynamicBoundaries(cg, scanList, named, targetFiles, allowedFiles);
         }
       }
 
@@ -3981,7 +3990,7 @@ export class ToolHandler {
           if (ids.some((id) => pathIds.has(id))) continue; // covered by the flow — silent
           polyCands.push({ token: t, family: fam });
         }
-        if (polyCands.length) polyText = this.buildPolymorphicBoundaries(cg, polyCands, named, targetFiles);
+        if (polyCands.length) polyText = this.buildPolymorphicBoundaries(cg, polyCands, named, targetFiles, allowedFiles);
       }
 
       // Supplementary: dynamic-dispatch (synthesized) edges incident to a named
@@ -4041,12 +4050,13 @@ export class ToolHandler {
    * at runtime. Query-time, deterministic, zero graph mutation; a fully
    * connected flow never reaches this method.
    */
-  private buildDynamicBoundaries(cg: CodeGraph, scanList: Node[], named: Map<string, Node>, targetFiles?: ReadonlySet<string>): string {
+  private buildDynamicBoundaries(cg: CodeGraph, scanList: Node[], named: Map<string, Node>, targetFiles?: ReadonlySet<string>, allowedFiles?: ReadonlySet<string>): string {
+    const scopedFiles = allowedFiles === undefined ? targetFiles : targetFiles === undefined ? allowedFiles : new Set([...allowedFiles].filter((file) => targetFiles.has(file)));
     const MAX_NOTES = 4; // boundary bullets per explore
     // The verdict is not derived here — `findDynamicBoundaries` produces it and
     // the viewer's end cap renders the same object, so the two can never
     // disagree about where a flow stops. What is left here is the prose.
-    const reports = findDynamicBoundaries(cg, scanList, { named, maxSites: MAX_NOTES, allowedFiles: targetFiles });
+    const reports = findDynamicBoundaries(cg, scanList, { named, maxSites: MAX_NOTES, allowedFiles: scopedFiles });
     const notes: string[] = [];
     for (const report of reports) {
       if (notes.length >= MAX_NOTES) break;
@@ -4090,7 +4100,7 @@ export class ToolHandler {
    * 611 implementers vs a handful). So candidate supertypes are ranked by their
    * TRUE graph-wide implementer count, NOT their frequency in the sample.
    */
-  private buildPolymorphicBoundaries(cg: CodeGraph, candidates: Array<{ token: string; family: Node[] }>, named: Map<string, Node>, targetFiles?: ReadonlySet<string>): string {
+  private buildPolymorphicBoundaries(cg: CodeGraph, candidates: Array<{ token: string; family: Node[] }>, named: Map<string, Node>, targetFiles?: ReadonlySet<string>, allowedFiles?: ReadonlySet<string>): string {
     const CLASSY = new Set(['class', 'struct', 'interface', 'trait', 'protocol', 'abstract']);
     const MIN_IMPL = 8;     // a supertype needs >= this many implementers to count as "polymorphic"
     const MIN_SUPPORT = 2;  // >= this many sampled definers must share the supertype (ties it to the token)
@@ -4159,7 +4169,9 @@ export class ToolHandler {
       const callableFamily = family[0]?.kind === 'method' || family[0]?.kind === 'function';
       // supertype id → how many sampled definers share it + a few example definers
       const supers = new Map<string, { node: Node; count: number; targets: Node[] }>();
-      for (const m of family.filter((node) => targetFiles === undefined || targetFiles.has(node.filePath)).slice(0, SAMPLE)) {
+      for (const m of family.filter((node) =>
+        (targetFiles === undefined || targetFiles.has(node.filePath))
+        && (allowedFiles === undefined || allowedFiles.has(node.filePath))).slice(0, SAMPLE)) {
         const container = containerOf(m);
         if (!container || !CLASSY.has(container.kind)) continue;
         let sups: Node[] = [];
@@ -4170,7 +4182,8 @@ export class ToolHandler {
             .filter((n): n is Node => !!n && CLASSY.has(n.kind) && (n.name?.length || 0) >= 3);
         } catch { /* no supertypes — free function or unresolved */ }
         for (const s of sups) {
-          if (targetFiles !== undefined && !targetFiles.has(s.filePath)) continue;
+          if ((targetFiles !== undefined && !targetFiles.has(s.filePath))
+            || (allowedFiles !== undefined && !allowedFiles.has(s.filePath))) continue;
           const e = supers.get(s.id) || { node: s, count: 0, targets: [] };
           e.count++;
           if (e.targets.length < 6) e.targets.push(m);
@@ -4187,7 +4200,7 @@ export class ToolHandler {
         // implementing X" is the same N on both surfaces (CG-58). Distinct
         // types, not edges: a class tied to its supertype by both a parsed
         // `extends` and a synthesized `implements` is one implementation.
-        const impl = countImplementers(cg, node.id, targetFiles);
+        const impl = countImplementers(cg, node.id, allowedFiles === undefined ? targetFiles : targetFiles === undefined ? allowedFiles : new Set([...allowedFiles].filter((file) => targetFiles.has(file))));
         if (impl < MIN_IMPL) continue;
         if (best && impl <= best.impl) continue;
         if (memberOfSupertype(node.id, memberName, callableFamily) === 'absent') continue;
@@ -4257,7 +4270,10 @@ export class ToolHandler {
      */
     leadingIds: Iterable<string> = [],
     targetFiles?: ReadonlySet<string>,
+    allowedFiles?: ReadonlySet<string>,
   ): string {
+    const isInScope = (node: Node): boolean => (targetFiles === undefined || targetFiles.has(node.filePath))
+      && (allowedFiles === undefined || allowedFiles.has(node.filePath));
     const ROOT_CAP = 5; // only the symbols the query actually targeted
     const FILE_CAP = 4; // caller files listed per symbol before "+N more"
     const TEMPLATE_VIEW_FILE = /\.(?:cshtml|razor|vue|svelte|astro)$/i;
@@ -4270,7 +4286,7 @@ export class ToolHandler {
 
     const roots = [...new Set([...leadingIds, ...subgraph.roots])]
       .map((id) => subgraph.nodes.get(id))
-      .filter((n): n is Node => !!n && MEANINGFUL.has(n.kind))
+      .filter((n): n is Node => !!n && MEANINGFUL.has(n.kind) && isInScope(n))
       .slice(0, ROOT_CAP);
     if (roots.length === 0) return '';
 
@@ -4279,7 +4295,7 @@ export class ToolHandler {
       let callers: Array<{ node: Node }> = [];
       try {
         callers = (cg.getCallers(root.id) as Array<{ node: Node }>)
-          .filter((caller) => targetFiles === undefined || targetFiles.has(caller.node.filePath));
+          .filter((caller) => isInScope(caller.node));
       } catch { /* skip this root */ }
 
       const seen = new Set<string>();
@@ -4307,7 +4323,7 @@ export class ToolHandler {
       const where = (codeFiles.length > 0 ? ` in ${shown}${more}` : '') + views;
       const tests = testFiles.length > 0
         ? `; tests: ${testFiles.slice(0, FILE_CAP).map((f) => `\`${f}\``).join(', ')}${testFiles.length > FILE_CAP ? ` +${testFiles.length - FILE_CAP}` : ''}`
-        : this.indirectTestNote(cg, uniq, rel, isTest, targetFiles);
+        : this.indirectTestNote(cg, uniq, rel, isTest, targetFiles, allowedFiles);
 
       entries.push(
         `- \`${root.name}\` (${rel(root.filePath)}:${root.startLine}) — ${uniq.length} caller${uniq.length === 1 ? '' : 's'}${where}${tests}`,
@@ -4370,7 +4386,7 @@ export class ToolHandler {
    * symbols had a test within 2-3 hops), so walk up to 2 more hops before
    * claiming anything — and even then claim only what was measured.
    */
-  private indirectTestNote(cg: CodeGraph, directCallers: Node[], rel: (p: string) => string, isTest: (n: Node) => boolean, targetFiles?: ReadonlySet<string>): string {
+  private indirectTestNote(cg: CodeGraph, directCallers: Node[], rel: (p: string) => string, isTest: (n: Node) => boolean, targetFiles?: ReadonlySet<string>, allowedFiles?: ReadonlySet<string>): string {
     const MAX_HOPS = 3; // direct callers are hop 1
     const BUDGET = 64;  // getCallers lookups per entry — bounds god-fan-in symbols
     const FILE_CAP = 2;
@@ -4387,7 +4403,8 @@ export class ToolHandler {
         for (const c of callers) {
           const n = c?.node;
           if (!n || visited.has(n.id)) continue;
-          if (targetFiles !== undefined && !targetFiles.has(n.filePath)) continue;
+          if ((targetFiles !== undefined && !targetFiles.has(n.filePath))
+            || (allowedFiles !== undefined && !allowedFiles.has(n.filePath))) continue;
           visited.add(n.id);
           if (isTest(n)) found.add(rel(n.filePath));
           else next.push(n);
@@ -4539,24 +4556,88 @@ export class ToolHandler {
     let unresolvedPathSpans: string[] = [];
     let lineAnchors: QueryLineAnchor[] = [];
     let setAsideMatches: QuerySetAsideMatch[] = [];
+    let notIndexedPathSpans: string[] = [];
+    let missingPathSpans: string[] = [];
+    let outsidePathSpans: string[] = [];
+    let allowedFilePaths: string[] | undefined;
+    let indexedScopeFiles: string[] = [];
+    let pathExtraction: ReturnType<typeof extractQueryPaths> | undefined;
     let matchQuery = query;
     if (queryMightContainPaths(rawQuery)) {
       try {
+        indexedScopeFiles = targetFiles ? [...targetFiles] : cg.getFiles().map((f) => f.path);
+        const indexedRepoFiles = targetFiles === undefined ? indexedScopeFiles : cg.getFiles().map((f) => f.path);
         const extraction = extractQueryPaths(
           rawQuery,
-          targetFiles ? [...targetFiles] : cg.getFiles().map((f) => f.path),
+          indexedScopeFiles,
           {
-            maxPins: maxFiles,
+            maxPins: maxFiles, rootPath: projectRoot, consumeDirectories: true,
             existsOnDisk: (rel) => pathIsProjectFile(projectRoot, rel),
             symbolFiles: (symbol) => filesDefiningSymbol(cg, symbol).filter((file) => targetFiles === undefined || targetFiles.has(file)),
           },
         );
-        if (extraction.pinnedFiles.length > 0 || extraction.unresolvedPathSpans.length > 0) {
+        pathExtraction = extraction;
+        const hardScope = extraction.hardScope;
+        const hasHardScope = hardScope !== undefined
+          && (hardScope.exactFiles.length > 0 || hardScope.directoryPrefixes.length > 0);
+        if (extraction.pinnedFiles.length > 0 || hasHardScope || extraction.unresolvedPathSpans.length > 0) {
           pinnedFiles = extraction.pinnedFiles;
           unresolvedPathSpans = extraction.unresolvedPathSpans;
           lineAnchors = extraction.lineAnchors;
           setAsideMatches = extraction.setAsideMatches;
           matchQuery = normalizeQuerySpelling(extraction.strippedQuery);
+          if (hasHardScope || extraction.unresolvedPathSpans.length > 0) {
+            matchQuery = normalizeQuerySpelling(extraction.strippedQuery);
+            const scoped = new Set<string>();
+            for (const filePath of hardScope?.exactFiles ?? []) scoped.add(filePath);
+            for (const prefix of hardScope?.directoryPrefixes ?? []) {
+              for (const filePath of indexedScopeFiles) {
+                if (filePath === prefix || filePath.startsWith(`${prefix}/`)) scoped.add(filePath);
+              }
+            }
+            allowedFilePaths = extraction.unresolvedPathSpans.length > 0
+              ? []
+              : indexedScopeFiles.filter((filePath) => scoped.has(filePath));
+          }
+        }
+        // DUMBAI: A dotted path token can name an existing auxiliary file that
+        // is absent from the source index. Check only query-shaped candidates
+        // under the validated root; never scan the project or ingest content.
+        const indexedLower = new Set(indexedRepoFiles.map((filePath) => filePath.toLowerCase()));
+        const indexedExtensions = new Set(indexedRepoFiles.map((filePath) => filePath.slice(filePath.lastIndexOf('.') + 1).toLowerCase()));
+        for (const rawToken of rawQuery.split(/\s+/)) {
+          const token = rawToken.replace(/^["'`([{]+|["'`,;:!?)}\]]+$/g, '');
+          if (!token || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(token)) continue;
+          if (!/(?:^|[\\/])[^\\/]+\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(token)) continue;
+          const normalizedToken = token.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+          if (indexedLower.has(normalizedToken.toLowerCase())) continue;
+          if (indexedRepoFiles.some(file => file.toLowerCase().endsWith(`/${normalizedToken.toLowerCase()}`))) continue;
+          // A dotted stem (`用户.v2` for `用户.v2.lua`, #1372) names an indexed file too.
+          const stem = normalizedToken.toLowerCase();
+          if (indexedRepoFiles.some(file => file.toLowerCase().startsWith(`${stem}.`) || file.toLowerCase().includes(`/${stem}.`))) continue;
+          if (extraction.pathAnchors?.some(anchor => anchor.status === 'resolved' && (anchor.raw === rawToken || anchor.normalized.toLowerCase() === normalizedToken.toLowerCase()))) continue;
+          if (!/[\\/]/.test(token) && filesDefiningSymbol(cg, token).length > 0) continue;
+          const absolute = validatePathWithinRoot(projectRoot, token);
+          if (absolute === null) {
+            if (!outsidePathSpans.includes(token)) outsidePathSpans.push(token);
+            continue;
+          }
+          try {
+            if (statSync(absolute).isFile()) {
+              if (!notIndexedPathSpans.includes(token)) notIndexedPathSpans.push(token);
+            } else if (!missingPathSpans.includes(token)) {
+              missingPathSpans.push(token);
+            }
+          } catch {
+            // `port.name` is a member access, not a missing file: no path, no indexed file type, and its tail names a symbol.
+            const tail = normalizedToken.slice(normalizedToken.lastIndexOf('.') + 1);
+            const memberAccess = !/[\\/]/.test(token) && !indexedExtensions.has(tail.toLowerCase()) && filesDefiningSymbol(cg, tail).length > 0;
+            if (!memberAccess && !missingPathSpans.includes(token)) missingPathSpans.push(token);
+          }
+        }
+        if (notIndexedPathSpans.length > 0 || missingPathSpans.length > 0 || outsidePathSpans.length > 0) {
+          matchQuery = '';
+          allowedFilePaths = [];
         }
       } catch { /* path pinning must never fail an explore call */ }
     }
@@ -4581,8 +4662,8 @@ export class ToolHandler {
     // if X changes" — gets its definition and every line that depends on it,
     // sized to the symbol rather than to the budget (#3407). A query that pins
     // a file, a line or a copybook keeps the general path, which owns those.
-    // A build-target scope keeps it too: only the general path filters to the target.
-    if (targetFiles === undefined && pinnedFiles.length === 0 && unresolvedPathSpans.length === 0 && lineAnchors.length === 0) {
+    // A build-target or path scope keeps it too: only the general path filters to a scope.
+    if (targetFiles === undefined && allowedFilePaths === undefined && pinnedFiles.length === 0 && unresolvedPathSpans.length === 0 && lineAnchors.length === 0) {
       const oneSymbol = this.exploreOneSymbol(cg, matchQuery, query, projectRoot, budget, maxFiles, indexedFileCount);
       if (oneSymbol) return oneSymbol;
     }
@@ -4597,6 +4678,9 @@ export class ToolHandler {
     }).join('');
     const pinnedSet = new Set(pinnedFiles);
     const pinnedOrder = new Map(pinnedFiles.map((p, i) => [p, i]));
+    const allowedFileSet = allowedFilePaths === undefined ? undefined : new Set(allowedFilePaths);
+    const isInScope = (node: Node): boolean =>
+      isInTarget(node) && (allowedFileSet === undefined || allowedFileSet.has(node.filePath));
 
     // Per-file allocation diagnostic (CG-4). `null` unless CODEGRAPH_EXPLORE_DEBUG
     // is set — every `diag?.` below is then a no-op and the response is
@@ -4632,13 +4716,14 @@ export class ToolHandler {
     // get re-served for no reason.
     const emittedByFile = new Map<
       string,
-      { ranges: ExploreLineRange[]; bytes: number; fingerprint?: string }
+      ExploreCoverageRenderFact
     >();
     const noteEmitted = (
       fp: string,
       ranges: ExploreLineRange[],
       bytes: number,
       fingerprint?: string,
+      fact?: Omit<ExploreCoverageRenderFact, 'path' | 'ranges' | 'bytes' | 'fingerprint'>,
     ): void => {
       const existing = emittedByFile.get(fp);
       if (existing) {
@@ -4646,7 +4731,15 @@ export class ToolHandler {
         existing.bytes += bytes;
         if (fingerprint) existing.fingerprint = fingerprint;
       } else {
-        emittedByFile.set(fp, { ranges: [...ranges], bytes, fingerprint });
+        emittedByFile.set(fp, {
+          path: fp,
+          ranges: [...ranges],
+          bytes,
+          fingerprint,
+          status: fact?.status ?? 'candidate-covered-partial',
+          fullRanges: fact?.fullRanges ?? [],
+          lineCount: fact?.lineCount ?? 0,
+        });
       }
     };
 
@@ -4662,7 +4755,36 @@ export class ToolHandler {
       minScore: 0.2,
       targetPath,
       includeDeps,
+      allowedFilePaths,
     });
+
+    // DUMBAI: Required exact families may be present in the context pool because the
+    // context budget is larger than Explore's file budget. Keep only complete,
+    // bounded families as named seeds; oversized families remain metadata-only.
+    const requiredSymbolCandidates = new Map<string, readonly Node[]>();
+    const blockedRequiredSymbols = new Set<string>();
+    const oversizedManyNodeIds = new Set<string>();
+    const addBlockedAliases = (resolution: NonNullable<Subgraph['symbolResolutions']>[number]): void => {
+      blockedRequiredSymbols.add(resolution.raw.toLowerCase());
+      blockedRequiredSymbols.add(resolution.normalized.toLowerCase());
+      for (const part of resolution.raw.split(/::|\./)) blockedRequiredSymbols.add(part.toLowerCase());
+    };
+    for (const resolution of subgraph.symbolResolutions ?? []) {
+      const fits = resolution.status === 'one'
+        || (resolution.status === 'many' && !resolution.truncated && resolution.candidates.length <= maxFiles);
+      const candidates = fits
+        ? resolution.candidates.map((candidate) => cg.getNode(candidate.nodeId)).filter((node): node is Node => node !== null)
+        : [];
+      if (!fits || candidates.length !== resolution.candidates.length) {
+        addBlockedAliases(resolution);
+        if (resolution.status === 'many') {
+          for (const candidate of resolution.candidates) oversizedManyNodeIds.add(candidate.nodeId);
+        }
+        continue;
+      }
+      requiredSymbolCandidates.set(resolution.raw.toLowerCase(), candidates);
+      requiredSymbolCandidates.set(resolution.normalized.toLowerCase(), candidates);
+    }
 
     // Pinned files' symbols enter the gather unconditionally — the agent named
     // the file itself, so its contents ARE the answer regardless of what the
@@ -4672,7 +4794,9 @@ export class ToolHandler {
       let fileNodes: Node[] = [];
       try { fileNodes = cg.getNodesInFile(fp); } catch { continue; }
       fileNodes
-        .filter((n) => isInTarget(n) && n.kind !== 'file' && n.kind !== 'import' && n.kind !== 'export')
+        .filter((n) => isInTarget(n)
+          && (allowedFileSet === undefined || allowedFileSet.has(n.filePath))
+          && n.kind !== 'file' && n.kind !== 'import' && n.kind !== 'export')
         .sort((a, b) => a.startLine - b.startLine)
         .slice(0, PINNED_FILE_NODE_CAP)
         .forEach((n) => { if (!subgraph.nodes.has(n.id)) subgraph.nodes.set(n.id, n); });
@@ -4713,27 +4837,127 @@ export class ToolHandler {
       spans.push(span);
       anchorSpans.set(anchor.file, spans);
     }
-    // Keep every downstream explore section inside the selected target. The
-    // context builder and pinned-file path both apply the scope, but this final
-    // guard also covers future graph glue additions and stale associations.
-    if (targetFiles !== undefined) {
-      for (const [id, node] of subgraph.nodes) {
-        if (!isInTarget(node)) subgraph.nodes.delete(id);
+    if (oversizedManyNodeIds.size > 0) {
+      for (const id of oversizedManyNodeIds) {
+        const node = subgraph.nodes.get(id);
+        if (node && !pinnedSet.has(node.filePath)) subgraph.nodes.delete(id);
       }
       subgraph.roots = subgraph.roots.filter((id) => subgraph.nodes.has(id));
       subgraph.edges = subgraph.edges.filter((edge) => subgraph.nodes.has(edge.source) && subgraph.nodes.has(edge.target));
     }
 
+    // Keep every downstream explore section inside the selected target. The
+    // context builder and pinned-file path both apply the scope, but this final
+    // guard also covers future graph glue additions and stale associations.
+    if (targetFiles !== undefined || allowedFilePaths !== undefined) {
+      for (const [id, node] of subgraph.nodes) {
+        if (!isInScope(node)) {
+          subgraph.nodes.delete(id);
+        }
+      }
+      subgraph.roots = subgraph.roots.filter((id) => subgraph.nodes.has(id));
+      subgraph.edges = subgraph.edges.filter((edge) => subgraph.nodes.has(edge.source) && subgraph.nodes.has(edge.target));
+    }
+
+    const formatSymbolResolutionNotes = (
+      resolutions: readonly NonNullable<Subgraph['symbolResolutions']>[number][],
+    ): string[] => resolutions
+      .filter((resolution) => resolution.status === 'many')
+      .map((resolution) => {
+        const count = `${resolution.candidates.length}${resolution.truncated ? '+' : ''}`;
+        const bounded = !resolution.truncated && resolution.candidates.length <= maxFiles;
+        return bounded
+          ? `Anchor \`${resolution.raw}\` is ambiguous: ${count} exact definitions were resolved as one family`
+          : `Anchor \`${resolution.raw}\` is ambiguous: at least ${count} exact definitions were found${resolution.truncated ? ' (candidate list truncated)' : ''}; no single definition was selected. Add a file or path scope to disambiguate`;
+      });
+    const symbolResolutionNotes = formatSymbolResolutionNotes(subgraph.symbolResolutions ?? []);
+
+    const coveragePathAnchors = (): NonNullable<ReturnType<typeof extractQueryPaths>['pathAnchors']> => {
+      const anchors = [...(pathExtraction?.pathAnchors ?? [])];
+      const known = new Set(anchors.flatMap((anchor) => [anchor.raw, anchor.normalized]));
+      const supplemental = [
+        ...notIndexedPathSpans.map((raw) => [raw, 'not-indexed'] as const),
+        ...missingPathSpans.map((raw) => [raw, 'missing'] as const),
+        ...outsidePathSpans.map((raw) => [raw, 'outside-root'] as const),
+      ];
+      let searchFrom = 0;
+      for (const [raw, status] of supplemental) {
+        const normalized = raw.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+        if (known.has(raw) || known.has(normalized)) continue;
+        const start = Math.max(0, rawQuery.indexOf(raw, searchFrom));
+        searchFrom = start + raw.length;
+        anchors.push({
+          raw,
+          ordinal: anchors.length,
+          start,
+          end: start + raw.length,
+          kind: 'file',
+          normalized,
+          status,
+          resolvedFiles: [],
+        });
+        known.add(raw);
+        known.add(normalized);
+      }
+      return anchors;
+    };
+    const hasExplicitCoverage = coveragePathAnchors().length > 0
+      || (subgraph.symbolResolutions?.length ?? 0) > 0
+      || pathExtraction?.pathAnchorsTruncated === true;
+    const coverageFor = (text: string) => buildExploreCoverage({
+      pathAnchors: coveragePathAnchors(),
+      pathAnchorStatusOverrides: new Map(
+        (pathExtraction?.pathAnchors ?? []).flatMap((anchor) => {
+          const status = notIndexedPathSpans.includes(anchor.normalized)
+            ? 'not-indexed' as const
+            : missingPathSpans.includes(anchor.normalized)
+              ? 'missing' as const
+              : outsidePathSpans.includes(anchor.raw) || outsidePathSpans.includes(anchor.normalized)
+                ? 'outside-root' as const
+                : undefined;
+          return status === undefined ? [] : [[anchor.raw, status], [anchor.normalized, status]];
+        }),
+      ),
+      pathAnchorsTruncated: pathExtraction?.pathAnchorsTruncated,
+      symbolResolutions: subgraph.symbolResolutions,
+      indexedFiles: indexedScopeFiles,
+      allowedFilePaths,
+      renderFacts: [...emittedByFile.values()].map((fact) => staleRendered.includes(fact.path)
+        ? { ...fact, status: 'stale' as const }
+        : fact),
+      finalText: text,
+    });
+    const exploreEmission = (text: string, emission: Omit<ExploreEmission, 'coverage'>): ToolResult => {
+      const coverage = coverageFor(text);
+      return { ...this.textResult(text), [EXPLORE_EMISSION_KEY]: {
+        ...emission,
+        ...(coverage === undefined ? {} : { coverage }),
+      } };
+    };
+
     if (subgraph.nodes.size === 0) {
       diag?.finishEmpty('no relevant code found — empty subgraph');
-      const missNote = unresolvedPathSpans.length > 0
-        ? ` (no indexed file uniquely matches ${unresolvedPathSpans.map((s) => `\`${s}\``).join(', ')})`
-        : '';
+      const pathNotes = [
+        unresolvedPathSpans.length > 0
+          ? `No indexed file uniquely matches ${unresolvedPathSpans.map((s) => `\`${s}\``).join(', ')}`
+          : '',
+        notIndexedPathSpans.length > 0
+          ? `Explicit file anchor${notIndexedPathSpans.length === 1 ? '' : 's'} ${notIndexedPathSpans.map((s) => `\`${s}\``).join(', ')} ${notIndexedPathSpans.length === 1 ? 'exists' : 'exist'} but ${notIndexedPathSpans.length === 1 ? 'is' : 'are'} not-indexed`
+          : '',
+        missingPathSpans.length > 0
+          ? `No repository file matches ${missingPathSpans.map((s) => `\`${s}\``).join(', ')}`
+          : '',
+        outsidePathSpans.length > 0
+          ? `Explicit path anchor${outsidePathSpans.length === 1 ? '' : 's'} ${outsidePathSpans.map((s) => `\`${s}\``).join(', ')} is outside the project root`
+          : '',
+        ...symbolResolutionNotes,
+      ].filter(Boolean);
+      const missNote = pathNotes.length > 0 ? ` (${pathNotes.join('. ')}.)` : '';
       let explanation = '\n\nExplore matches symbol/file names and indexed code words lexically, not by meaning.';
       if (indexedNodeCount === 0) {
         explanation += '\nThis project has nothing indexed.';
       } else {
-        const miss = cg.getExploreMissDiagnostics(matchQuery);
+        const miss = cg.getExploreMissDiagnostics(normalizeQuerySpelling(pathExtraction?.strippedQuery ?? matchQuery));
         const list = (words: string[]) => words.map(w => `\`${w}\``).join(', ');
         // Separate caps preserve the retry instruction and complete candidate
         // names even with long queries or generated identifiers.
@@ -4762,11 +4986,15 @@ export class ToolHandler {
         if (unseen.length > 0) explanation += `\n\n${notInIndexNote(unseen, false)}`;
       }
       const empty = `No relevant code found for "${query}"${missNote}${explanation}`;
+      const earlyCoverage = coverageFor(empty);
+      const emptyWithCoverage = earlyCoverage === undefined
+        ? empty
+        : `${empty}\n\n> ${formatExploreCoverage(earlyCoverage)}`;
       // Still an explore call, so it is still recorded: an empty answer spends a
       // call against the tier budget even though it emits no source.
-      return { ...this.textResult(empty), [EXPLORE_EMISSION_KEY]: {
-        projectRoot, query, files: [], sourceBytes: 0, responseBytes: empty.length,
-      } };
+      return exploreEmission(emptyWithCoverage, {
+        projectRoot, query, files: [], sourceBytes: 0, responseBytes: emptyWithCoverage.length,
+      });
     }
 
     // Graph-aware glue: findRelevantContext builds the subgraph from name/text
@@ -4795,7 +5023,7 @@ export class ToolHandler {
       for (const nb of neighbors) {
         if (glueNodeIds.size >= GLUE_NODE_CAP) break;
         if (subgraph.nodes.has(nb.id)) continue;
-        if (!isInTarget(nb)) continue;
+        if (!isInScope(nb)) continue;
         if (!subgraphFiles.has(nb.filePath)) continue;
         subgraph.nodes.set(nb.id, nb);
         glueNodeIds.add(nb.id);
@@ -4925,13 +5153,20 @@ export class ToolHandler {
         return false;
       };
       for (const t of tokens) {
+        if (blockedRequiredSymbols.has(t.toLowerCase())) {
+          // A blocked anchor with no definition is still a name to report as unseen (#2462).
+          const zero = subgraph.symbolResolutions?.some((r) => r.status === 'zero' && r.raw.toLowerCase() === t.toLowerCase());
+          if (zero && isIdentifierShapedToken(t)) unresolvedNamedTokens.push(t);
+          continue;
+        }
         // Enumerate ALL defs of a bare token via the direct index, not FTS — a
         // 50+-overload name (tokio `poll`) ranks the wanted def (`Harness::poll`)
         // below the FTS cut, so findAllSymbols would never see it and the
         // type-token bias below couldn't pick the harness.rs one. (Same fix as
         // codegraph_node's findSymbolMatches.) Qualified tokens keep findAllSymbols.
         const isQual = /[.\/]|::/.test(t);
-        const raw = (isQual ? this.findAllSymbols(cg, t).nodes : cg.getNodesByName(t)).filter(isInTarget);
+        const exact = requiredSymbolCandidates.get(t.toLowerCase());
+        const raw = (exact ?? (isQual ? this.findAllSymbols(cg, t).nodes : cg.getNodesByName(t))).filter(isInScope);
         // A query that NAMES a declared type is a question ABOUT that type, and
         // must still reach its declaration file at full weight — so record the
         // files those declarations live in and exempt them from the
@@ -4967,9 +5202,10 @@ export class ToolHandler {
               kinds: ['function', 'method', 'component', 'variable', 'constant'],
               targetPath,
               includeDeps,
+              allowedFilePaths,
               limit: 60,
             })
-            .filter(isInTarget)
+            .filter(isInScope)
             .filter((n) => SEEDABLE.has(n.kind) && !isTestPath(n.filePath))
             .filter((n) => {
               const idx = n.name.toLowerCase().indexOf(lcToken);
@@ -4997,7 +5233,10 @@ export class ToolHandler {
         // explore-side mirror of codegraph_node's overload disambiguation.
         let picks: Node[];
         let tierPicks: Node[]; // subset that earns the named-first tier (#1064)
-        if (cands.length <= 3) {
+        if (exact !== undefined) {
+          picks = cands;
+          tierPicks = cands.length === 1 ? cands : [];
+        } else if (cands.length <= 3) {
           picks = cands;
           // Centrality de-noise: tier the most-substantive def PLUS any co-named
           // def of comparable centrality (a real overload/wrapper — excalidraw's
@@ -5014,6 +5253,7 @@ export class ToolHandler {
           tierPicks = picks; // corroborated overloads (or the single fallback) all earn it
         }
         for (const n of picks) {
+          if (!isInScope(n)) continue;
           if (!subgraph.nodes.has(n.id)) subgraph.nodes.set(n.id, n);
           // Mark as a named seed EVEN IF the FTS gather already had it — being
           // "named by the agent" is independent of whether search happened to
@@ -5151,6 +5391,7 @@ export class ToolHandler {
         if (!SIG_EDGE.has(e.kind)) continue;
         const tgt = cg.getNode(e.target);
         if (!tgt || !TYPE_KINDS.has(tgt.kind) || namedSeedIds.has(tgt.id)) continue;
+        if (!isInScope(tgt)) continue;
         if (seenChangeSurface.has(tgt.id)) continue;
         seenChangeSurface.add(tgt.id);
         changeSurfaceCandidates.push(tgt);
@@ -5424,6 +5665,14 @@ export class ToolHandler {
       if (!relevantFiles.some(([f]) => f === fp)) relevantFiles.push([fp, group]);
     }
 
+    if (targetFiles !== undefined || allowedFileSet !== undefined) {
+      for (const [id, node] of subgraph.nodes) {
+        if (!isInScope(node)) subgraph.nodes.delete(id);
+      }
+      subgraph.roots = subgraph.roots.filter((id) => subgraph.nodes.has(id));
+      subgraph.edges = subgraph.edges.filter((edge) => subgraph.nodes.has(edge.source) && subgraph.nodes.has(edge.target));
+    }
+
     // Relevance gate (so the generous budget is a CEILING, not a target): keep a
     // file only if it is STRUCTURALLY relevant by ANY of:
     //   - graph score within a fraction of the top (it's on/near the flow), OR
@@ -5590,7 +5839,7 @@ export class ToolHandler {
     // Blast radius (always-on, compact): for the entry symbols, who depends on
     // them + which tests cover them — locations only, no source — so the agent
     // knows what to update/verify before editing without a separate call.
-    const blastRadius = this.buildBlastRadiusSection(cg, subgraph, exactNodeIds, targetFiles);
+    const blastRadius = this.buildBlastRadiusSection(cg, subgraph, exactNodeIds, targetFiles, allowedFileSet);
     if (blastRadius) lines.push(blastRadius);
 
     // Relationship map — show how symbols connect
@@ -5635,7 +5884,7 @@ export class ToolHandler {
     // The Flow section labels each hop with its branch conditions; that read
     // is synchronous, so the grammars it needs are loaded here, once.
     await warmBranchGuardGrammars();
-    const flow = this.buildFlowFromNamedSymbols(cg, matchQuery, targetFiles);
+    const flow = this.buildFlowFromNamedSymbols(cg, matchQuery, targetFiles, allowedFileSet, blockedRequiredSymbols, requiredSymbolCandidates);
 
     // The symbols the question is about: exact targets, the named ones, the spine.
     const questionIds = new Set([...exactNodeIds, ...flow.pathNodeIds, ...flow.namedNodeIds]);
@@ -5834,7 +6083,14 @@ export class ToolHandler {
     // first cluster) — and catches it HERE, where a file can be skipped cleanly and
     // a later one still render, instead of at the final truncation, which lops off
     // whichever section happened to land last.
-    const renderCeiling = hardCeiling - epilogueFloor;
+    let renderCeiling = hardCeiling - epilogueFloor;
+    if (hasExplicitCoverage) {
+      // Reserve room before rendering so the final anchor note cannot push an
+      // anchored response beyond the hard response ceiling.
+      const note = formatExploreCoverage(coverageFor('')!);
+      const reserve = Math.min(EXPLORE_COVERAGE_NOTE_MAX, note.length + 160);
+      renderCeiling = Math.max(0, renderCeiling - reserve - 8);
+    }
     // `flow.text` is PART of the response — it is prepended to `lines` to make
     // the final output — so the render loop has to spend against it, and it
     // never did. Counting it is what makes `renderCeiling` the ceiling it
@@ -5882,6 +6138,7 @@ export class ToolHandler {
       overhead: number;
       ranges: ExploreLineRange[];
       fingerprint: string;
+      lineCount: number;
     };
     let suppressedFallback: SuppressedFallback | null = null;
     // Reservation carry-forward (CG-21). A reservation is a promise the render
@@ -6268,7 +6525,16 @@ export class ToolHandler {
           newSourceChars += body.length;
           diag?.recordRender(filePath, opts.mode, body.length, opts.clipped || opts.covered.length > 0);
           if (opts.covered.length > 0) diag?.recordDedup(filePath, coveredChars(opts.covered), opts.covered);
-          noteEmitted(filePath, [...ranges, ...opts.covered], body.length, fingerprint);
+          const renderStatus: ExploreCoverageRenderFact['status'] = opts.covered.length > 0
+            ? 'back-reference'
+            : opts.clipped
+              ? opts.mode === 'focused' || opts.mode === 'skeleton' ? opts.mode : 'clipped'
+              : opts.mode === 'whole' ? 'full-current' : 'candidate-covered-partial';
+          noteEmitted(filePath, [...ranges, ...opts.covered], body.length, fingerprint, {
+            status: renderStatus,
+            fullRanges: opts.fullRanges,
+            lineCount: fileLines.length,
+          });
           renderedFilePaths.push(filePath);
           filesIncluded++;
           return;
@@ -6282,7 +6548,11 @@ export class ToolHandler {
         // header plus the pointer and nothing else.)
         diag?.recordRender(filePath, 'backref', 0, false);
         diag?.recordDedup(filePath, coveredChars(opts.covered), opts.covered);
-        noteEmitted(filePath, opts.covered, 0, fingerprint);
+        noteEmitted(filePath, opts.covered, 0, fingerprint, {
+          status: opts.covered.length > 0 ? 'back-reference' : 'pointer',
+          fullRanges: opts.fullRanges,
+          lineCount: fileLines.length,
+        });
         renderedFilePaths.push(filePath);
         if (!suppressedFallback && opts.fullBody.length > 0) {
           suppressedFallback = {
@@ -6294,6 +6564,7 @@ export class ToolHandler {
             overhead: opts.overhead,
             ranges: opts.fullRanges,
             fingerprint,
+            lineCount: fileLines.length,
           };
         }
       };
@@ -7778,7 +8049,7 @@ export class ToolHandler {
       // target's overshoot, #2063) left the one below its estimate, and the trim
       // took the difference out of source: 922 of the 1,031 it was owed.
       let headerLimit = Infinity;
-      if (totalChars + costOfSection(fileHeader, assembled.text) > renderCeiling) {
+      if (hasExplicitCoverage || totalChars + costOfSection(fileHeader, assembled.text) > renderCeiling) {
         headerLimit = sectionOverhead(filePath, group.nodes) - 2 - lang.length - 11;
         fileHeader = headerFor(assembled.symbols, assembled.elided, headerLimit);
       }
@@ -7921,9 +8192,13 @@ export class ToolHandler {
         const idx = backReferencedFiles.indexOf(restore.filePath);
         if (idx >= 0) backReferencedFiles.splice(idx, 1);
         emittedByFile.set(restore.filePath, {
+          path: restore.filePath,
           ranges: [...restore.ranges],
           bytes: restore.sourceChars,
           fingerprint: restore.fingerprint,
+          status: 'full-current',
+          fullRanges: [{ start: 1, end: Math.max(1, restore.lineCount - 1) }],
+          lineCount: restore.lineCount,
         });
         diag?.recordRender(restore.filePath, 'clusters', restore.sourceChars, false);
         diag?.recordDedup(restore.filePath, 0, []);
@@ -8096,7 +8371,9 @@ export class ToolHandler {
     const epilogueOnlyCut = epilogueStart < lines.length
       ? flow.text + lines.slice(0, epilogueStart).join('\n')
       : null;
-    const EPILOGUE_CUT_NOTE = EXPLORE_FALLBACK_NOTES.cut[
+    const EPILOGUE_CUT_NOTE = hasExplicitCoverage
+      ? '\n\n> (Trailing notes omitted for size; see Anchor coverage below for missing required source.)'
+      : EXPLORE_FALLBACK_NOTES.cut[
       epilogueOnlyCut !== null && trimmedIn(epilogueOnlyCut) ? 'trimmed' : 'complete'];
 
     if (output.length > hardCeiling
@@ -8114,7 +8391,9 @@ export class ToolHandler {
       const lastSection = cut.lastIndexOf('\n' + FILE_SECTION_PREFIX);
       const boundary = lastSection > hardCeiling * 0.5 ? lastSection : cut.lastIndexOf('\n');
       const safe = boundary > 0 ? cut.slice(0, boundary) : cut;
-      finalText = safe + EXPLORE_FALLBACK_NOTES.truncated[trimmedIn(safe) ? 'trimmed' : 'complete'];
+      finalText = safe + (hasExplicitCoverage
+        ? '\n\n... (output truncated to budget; see Anchor coverage below for required source that was clipped or dropped.)'
+        : EXPLORE_FALLBACK_NOTES.truncated[trimmedIn(safe) ? 'trimmed' : 'complete']);
     } else {
       finalText = output;
     }
@@ -8126,30 +8405,77 @@ export class ToolHandler {
     // only if its section header is still present; its relevant (non-import)
     // symbols are summed for N. Files we couldn't fit are still named under "Not
     // shown above" + the budget note, so nothing is silently dropped.
-    const survivors = renderedFilePaths.filter((fp) =>
+    let survivors = renderedFilePaths.filter((fp) =>
       finalText.includes(`${FILE_SECTION_PREFIX}${fp}\``));
-    const shownSymbols = survivors.reduce((sum, fp) => {
-      const g = fileGroups.get(fp);
-      if (!g) return sum;
-      return sum + new Set(
-        g.nodes.filter(isListedSymbol).map((n) => n.id),
-      ).size;
-    }, 0);
-    let summaryLine = survivors.length > 0
-      ? `Found ${shownSymbols} symbol${shownSymbols === 1 ? '' : 's'} across ${survivors.length} file${survivors.length === 1 ? '' : 's'}.`
-      : `Found ${subgraph.nodes.size} symbol${subgraph.nodes.size === 1 ? '' : 's'} across ${fileGroups.size} file${fileGroups.size === 1 ? '' : 's'}.`;
-    // Path pinning is visible, not silent: say which query-named files were
-    // honored, and which path spans matched nothing so the agent can correct
-    // them instead of trusting a response that quietly ignored the path.
-    const pinnedShown = pinnedFiles.filter((fp) => survivors.includes(fp)).length;
-    if (pinnedShown > 0) {
-      summaryLine += ` ${pinnedShown} file${pinnedShown === 1 ? '' : 's'} pinned from the query.`;
+    const summaryFor = (base: string): string => {
+      survivors = renderedFilePaths.filter((fp) =>
+        base.includes(`${FILE_SECTION_PREFIX}${fp}\``));
+      const shownSymbols = survivors.reduce((sum, fp) => {
+        const g = fileGroups.get(fp);
+        if (!g) return sum;
+        return sum + new Set(
+          g.nodes.filter(isListedSymbol).map((n) => n.id),
+        ).size;
+      }, 0);
+      let summaryLine = survivors.length > 0
+        ? `Found ${shownSymbols} symbol${shownSymbols === 1 ? '' : 's'} across ${survivors.length} file${survivors.length === 1 ? '' : 's'}.`
+        : `Found ${subgraph.nodes.size} symbol${subgraph.nodes.size === 1 ? '' : 's'} across ${fileGroups.size} file${fileGroups.size === 1 ? '' : 's'}.`;
+      // Path pinning is visible, not silent: say which query-named files were
+      // honored, and which path spans matched nothing so the agent can correct
+      // them instead of trusting a response that quietly ignored the path.
+      const pinnedShown = pinnedFiles.filter((fp) => survivors.includes(fp)).length;
+      if (pinnedShown > 0) {
+        summaryLine += ` ${pinnedShown} file${pinnedShown === 1 ? '' : 's'} pinned from the query.`;
+      }
+      if (unresolvedPathSpans.length > 0) {
+        summaryLine += ` No indexed file uniquely matches ${unresolvedPathSpans.map((s) => `\`${s}\``).join(', ')}.`;
+      }
+      if (notIndexedPathSpans.length > 0) {
+        summaryLine += ` Explicit file anchor${notIndexedPathSpans.length === 1 ? '' : 's'} ${notIndexedPathSpans.map((s) => `\`${s}\``).join(', ')} ${notIndexedPathSpans.length === 1 ? 'exists' : 'exist'} but ${notIndexedPathSpans.length === 1 ? 'is' : 'are'} not-indexed.`;
+      }
+      if (missingPathSpans.length > 0) {
+        summaryLine += ` No repository file matches ${missingPathSpans.map((s) => `\`${s}\``).join(', ')}.`;
+      }
+      if (outsidePathSpans.length > 0) {
+        summaryLine += ` Explicit path anchor${outsidePathSpans.length === 1 ? '' : 's'} ${outsidePathSpans.map((s) => `\`${s}\``).join(', ')} is outside the project root.`;
+      }
+      for (const note of symbolResolutionNotes) summaryLine += ` ${note}.`;
+      summaryLine += setAsideNote;
+      return summaryLine;
+    };
+    const trimForCoverageNote = (base: string, maxLength: number): string => {
+      if (base.length <= maxLength) return base;
+      const marker = hasExplicitCoverage
+        ? '\n\n... (output truncated to budget; see Anchor coverage below for required source that was clipped or dropped.)'
+        : '\n\n... (output truncated to budget.)';
+      const bodyLimit = Math.max(0, maxLength - marker.length);
+      const cut = base.slice(0, bodyLimit);
+      const lastSection = cut.lastIndexOf('\n' + FILE_SECTION_PREFIX);
+      const boundary = lastSection > bodyLimit * 0.5 ? lastSection : cut.lastIndexOf('\n');
+      const safe = boundary > 0 ? cut.slice(0, boundary) : cut;
+      return `${safe}${marker}`.slice(0, maxLength);
+    };
+    const renderSummaryAndCoverage = (base: string): {
+      text: string;
+      coverage: ReturnType<typeof coverageFor>;
+    } => {
+      const summaryLine = summaryFor(base);
+      const coverage = coverageFor(base);
+      const noteLimit = Math.max(32, Math.min(EXPLORE_COVERAGE_NOTE_MAX, hardCeiling - 128));
+      const note = coverage === undefined ? '' : `\n\n> ${formatExploreCoverage(coverage, noteLimit)}`;
+      return { text: base.replace(SUMMARY_SENTINEL, `${summaryLine}${note}`), coverage };
+    };
+    if (hasExplicitCoverage) {
+      let rendered = renderSummaryAndCoverage(finalText);
+      for (let attempt = 0; attempt < 3 && rendered.text.length > hardCeiling; attempt++) {
+        const replacementOverhead = rendered.text.length - finalText.length;
+        finalText = trimForCoverageNote(finalText, hardCeiling - replacementOverhead);
+        rendered = renderSummaryAndCoverage(finalText);
+      }
+      finalText = rendered.text;
+    } else {
+      finalText = finalText.replace(SUMMARY_SENTINEL, summaryFor(finalText));
     }
-    if (unresolvedPathSpans.length > 0) {
-      summaryLine += ` No indexed file uniquely matches ${unresolvedPathSpans.map((s) => `\`${s}\``).join(', ')}.`;
-    }
-    summaryLine += setAsideNote;
-    finalText = finalText.replace(SUMMARY_SENTINEL, summaryLine);
 
     // Emit the allocation diagnostic from the FINAL text, so per-file bytes and
     // shares account for the hard-ceiling truncation above (CG-4).
@@ -8189,6 +8515,7 @@ export class ToolHandler {
       files: emittedFiles,
       sourceBytes,
       responseBytes: finalText.length,
+      coverage: coverageFor(finalText),
     };
     return result;
   }

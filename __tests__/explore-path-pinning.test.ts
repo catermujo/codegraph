@@ -100,6 +100,7 @@ describe('extension-less kebab basenames (the amnisphere gap)', () => {
     // into `background`/`image`/`table` and served the fragment decoy instead.
     const out = await explore('background-image-table Source column');
     expect(hasSection(out, KEBAB_TARGET)).toBe(true);
+    expect(hasSection(out, 'src/lib/background-store.ts')).toBe(false);
     expect(out).toContain('pinned from the query');
   });
 

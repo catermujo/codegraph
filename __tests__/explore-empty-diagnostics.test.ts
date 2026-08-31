@@ -62,7 +62,7 @@ describe('empty explore diagnostics (#1904)', () => {
   it('keeps unresolved paths separate from word diagnostics', async () => {
     await index(registration);
     const text = await explore('missing/phantom.py signing');
-    expect(text).toContain('no indexed file uniquely matches `missing/phantom.py`');
+    expect(text.toLowerCase()).toContain('no indexed file uniquely matches `missing/phantom.py`');
     expect(text).toMatch(/No lexical matches[^\n]*`signing`/);
     expect(text).not.toMatch(/No lexical matches[^\n]*`phantom`/);
   });
