@@ -87,6 +87,97 @@ describe('monorepo target query scope', () => {
     expect(scoped[0]?.node.filePath).toBe('pkg-a/a.ts');
   });
 
+  it('applies a concrete allowed-file gate before a low result limit', () => {
+    const options = { allowedFilePaths: ['pkg-b/b.ts'], limit: 1 };
+    const scoped = graph.searchNodes('SharedThing', options);
+    expect(scoped.map((result) => result.node.filePath)).toEqual(['pkg-b/b.ts']);
+  });
+
+  it('treats an explicit empty allowed-file set as matching nothing', () => {
+    const options = { allowedFilePaths: [], limit: 20 };
+    expect(graph.searchNodes('SharedThing', options)).toEqual([]);
+  });
+
+  it('gates a Unicode canonical file path exactly', async () => {
+    fs.writeFileSync(path.join(root, 'pkg-a', 'Élite.ts'), 'export function SharedThing() { return "unicode"; }\n');
+    await graph.sync({ paths: ['pkg-a/Élite.ts'] });
+
+    const options = { allowedFilePaths: ['pkg-a/Élite.ts'], limit: 20 };
+    expect(graph.searchNodes('SharedThing', options).map((result) => result.node.filePath)).toEqual(['pkg-a/Élite.ts']);
+  });
+
+  it('intersects allowed files with target and public path scopes', () => {
+    const options = {
+      allowedFilePaths: ['pkg-a/a.ts'],
+      targetPath: 'pkg-a',
+      includeDeps: true,
+      limit: 20,
+    };
+    expect(graph.searchNodes('SharedThing path:pkg-b', options)).toEqual([]);
+  });
+
+  it('applies allowed files before context exact-name limits and traversal', async () => {
+    for (let i = 0; i < 60; i++) {
+      fs.writeFileSync(path.join(root, `decoy-${String(i).padStart(2, '0')}.ts`), 'export function SharedThing() { return "decoy"; }\n');
+    }
+    fs.writeFileSync(path.join(root, 'zz-target.ts'), 'export function SharedThing() { return "target"; }\n');
+    await graph.indexAll();
+
+    const context = await graph.findRelevantContext('SharedThing', {
+      allowedFilePaths: ['zz-target.ts'],
+      searchLimit: 1,
+      maxNodes: 20,
+    });
+    expect([...context.nodes.values()].map((node) => node.filePath)).toEqual(['zz-target.ts']);
+    expect(context.edges).toEqual([]);
+  });
+
+  it('returns an empty context for an explicit empty allowed-file set', async () => {
+    const context = await graph.findRelevantContext('SharedThing', {
+      allowedFilePaths: [],
+      searchLimit: 20,
+      maxNodes: 20,
+    });
+    expect(context.nodes.size).toBe(0);
+    expect(context.edges).toEqual([]);
+  });
+
+  it('keeps prefix and text candidates inside the allowed file set', async () => {
+    fs.writeFileSync(path.join(root, 'pkg-a', 'allowed.ts'), 'export class SharedThingHelper {}\n');
+    fs.writeFileSync(path.join(root, 'pkg-a', 'outside.ts'), 'export class SharedThingHelperOutside {}\n');
+    await graph.sync({ paths: ['pkg-a/allowed.ts', 'pkg-a/outside.ts'] });
+
+    const context = await graph.findRelevantContext('shared helper', {
+      allowedFilePaths: ['pkg-a/allowed.ts'],
+      searchLimit: 20,
+      maxNodes: 20,
+    });
+    expect([...context.nodes.values()].every((node) => node.filePath === 'pkg-a/allowed.ts')).toBe(true);
+  });
+
+  it('supports a Unicode canonical allowed file path in context', async () => {
+    fs.writeFileSync(path.join(root, 'pkg-a', 'Élite.ts'), 'export function SharedThing() { return "unicode"; }\n');
+    await graph.sync({ paths: ['pkg-a/Élite.ts'] });
+
+    const context = await graph.findRelevantContext('SharedThing', {
+      allowedFilePaths: ['pkg-a/Élite.ts'],
+      searchLimit: 20,
+      maxNodes: 20,
+    });
+    expect([...context.nodes.values()].map((node) => node.filePath)).toEqual(['pkg-a/Élite.ts']);
+  });
+
+  it('intersects allowed files with target scope in context', async () => {
+    const context = await graph.findRelevantContext('SharedThing', {
+      allowedFilePaths: ['pkg-b/b.ts'],
+      targetPath: 'pkg-a',
+      searchLimit: 20,
+      maxNodes: 20,
+    });
+    expect(context.nodes.size).toBe(0);
+    expect(context.edges).toEqual([]);
+  });
+
   it('uses persisted manifests for transitive scope, cycles, and unresolved dependencies', async () => {
     const dependencyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-target-deps-'));
     const manifests: Record<string, string> = {

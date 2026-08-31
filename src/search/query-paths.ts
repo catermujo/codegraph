@@ -27,6 +27,8 @@
  * and safe inside the query-pool workers.
  */
 
+import * as path from 'path';
+
 export interface QueryPathExtraction {
   /** The query with resolved/clearly-path spans removed, whitespace-joined. */
   strippedQuery: string;
@@ -39,6 +41,45 @@ export interface QueryPathExtraction {
    * surfaced to the agent so the miss is visible instead of silent.
    */
   unresolvedPathSpans: string[];
+  /** Explicit indexed files and directory prefixes for later hard scoping. */
+  hardScope?: QueryPathScope;
+  /** Each path-shaped query occurrence that was actually resolved or rejected. */
+  pathAnchors?: QueryPathAnchor[];
+  /** True when bounded processing left one or more query tokens unexamined. */
+  pathAnchorsTruncated?: boolean;
+  /** Exact number of query tokens after the first bounded stop. */
+  unexaminedTokenCount?: number;
+  /** Safety caps that caused bounded path processing to stop. */
+  pathAnchorsTruncationReasons?: QueryPathAnchorTruncationReason[];
+}
+
+interface QueryPathScope {
+  exactFiles: string[];
+  directoryPrefixes: string[];
+}
+
+export type QueryPathAnchorKind = 'file' | 'directory' | 'unresolved-path';
+export type QueryPathAnchorStatus =
+  | 'resolved' | 'ambiguous' | 'unresolved' | 'not-indexed' | 'missing' | 'outside-root';
+export type QueryPathAnchorTruncationReason = 'max-pins' | 'candidate-cap';
+
+/** Serializable identity for one explicit path attempt in the original query. */
+export interface QueryPathAnchor {
+  /** The exact whitespace-delimited spelling, including wrapping punctuation. */
+  raw: string;
+  /** Zero-based token occurrence in the original query. */
+  ordinal: number;
+  /** UTF-16 offsets into the original query. */
+  start: number;
+  end: number;
+  kind: QueryPathAnchorKind;
+  /** Normalized query spelling, or the best lexical normalization after rejection. */
+  normalized: string;
+  status: QueryPathAnchorStatus;
+  /** Canonical indexed files selected by this occurrence. */
+  resolvedFiles: string[];
+  /** Canonical indexed directory prefix selected by this occurrence. */
+  directoryPrefix?: string;
 }
 
 /**
@@ -145,11 +186,64 @@ function normalizeSpan(span: string): string {
     .replace(/\/+$/, '');
 }
 
+function isWindowsAbsolute(span: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(span) || /^[/\\]{2}[^/\\]/.test(span);
+}
+
+function isDriveRelative(span: string): boolean {
+  return /^[A-Za-z]:[^\\/]/.test(span);
+}
+
+function isSchemeLike(span: string): boolean {
+  return !isWindowsAbsolute(span) && /^[A-Za-z][A-Za-z0-9+.-]*:/.test(span);
+}
+
+function normalizeRootedSpan(span: string, rootPath: string): string | null {
+  if (isDriveRelative(span)) return null;
+  const windowsRoot = isWindowsAbsolute(rootPath);
+  if (windowsRoot) {
+    if (span.startsWith('/') && !isWindowsAbsolute(span)) return null;
+    const root = path.win32.normalize(rootPath).replace(/\\/g, '/').replace(/\/+$/, '');
+    const candidate = isWindowsAbsolute(span)
+      ? path.win32.normalize(span).replace(/\\/g, '/').replace(/\/+$/, '')
+      : normalizeSpan(span);
+    if (isWindowsAbsolute(span)) {
+      if (candidate.toLowerCase() === root.toLowerCase()) return '';
+      if (!candidate.toLowerCase().startsWith(root.toLowerCase() + '/')) return null;
+      return normalizeSpan(candidate.slice(root.length + 1));
+    }
+    return normalizeSpan(candidate);
+  }
+  if (isWindowsAbsolute(span)) return null;
+  const root = path.posix.normalize(rootPath).replace(/\/+$/, '');
+  const candidate = path.posix.normalize(span).replace(/\/+$/, '');
+  if (candidate.startsWith('/')) {
+    if (candidate.toLowerCase() === root.toLowerCase()) return '';
+    if (!candidate.toLowerCase().startsWith(root.toLowerCase() + '/')) return null;
+    return normalizeSpan(candidate.slice(root.length + 1));
+  }
+  const segments: string[] = [];
+  for (const segment of candidate.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (segments.length === 0) return null;
+      segments.pop();
+    } else {
+      segments.push(segment);
+    }
+  }
+  return segments.join('/');
+}
+
 /** Path-shaped beyond doubt: ≥2 segments and a dot-extension on the last. */
 function isClearlyPathShaped(normalized: string): boolean {
   const slash = normalized.lastIndexOf('/');
   if (slash <= 0) return false;
   return DOTTED_BASENAME.test(normalized.slice(slash + 1));
+}
+
+function isPathTokenShape(stripped: string): boolean {
+  return /[/\\]/.test(stripped) || DOTTED_BASENAME.test(stripped);
 }
 
 /**
@@ -163,33 +257,61 @@ function isClearlyPathShaped(normalized: string): boolean {
 function resolveSpan(
   normalizedLower: string,
   lowerToOriginal: ReadonlyMap<string, string>,
+  getDirectoryPrefixes: () => ReadonlyMap<string, readonly string[]>,
   maxMatches: number,
-): { matches: string[]; ambiguous: boolean } {
-  const exact = lowerToOriginal.get(normalizedLower);
-  if (exact) return { matches: [exact], ambiguous: false };
+  preferDirectory: boolean,
+): { matches: string[]; directoryPrefixes: string[]; ambiguous: boolean } {
+  if (!preferDirectory) {
+    const exact = lowerToOriginal.get(normalizedLower);
+    if (exact) return { matches: [exact], directoryPrefixes: [], ambiguous: false };
+  }
 
   const segments = normalizedLower.split('/').filter(Boolean);
   const tries = Math.min(segments.length, MAX_SUFFIX_TRIES);
+  if (!preferDirectory) {
+    for (let drop = 0; drop < tries; drop++) {
+      const suffix = segments.slice(drop).join('/');
+      if (!suffix) break;
+      const withSlash = '/' + suffix;
+      const matches: string[] = [];
+      for (const [lower, original] of lowerToOriginal) {
+        if (lower === suffix || lower.endsWith(withSlash)) {
+          matches.push(original);
+          if (matches.length > maxMatches) return { matches: [], directoryPrefixes: [], ambiguous: true };
+        }
+      }
+      if (matches.length > 0) return { matches, directoryPrefixes: [], ambiguous: false };
+    }
+  }
+  const lowerToDirectoryPrefixes = getDirectoryPrefixes();
   for (let drop = 0; drop < tries; drop++) {
     const suffix = segments.slice(drop).join('/');
     if (!suffix) break;
     const withSlash = '/' + suffix;
-    const matches: string[] = [];
-    for (const [lower, original] of lowerToOriginal) {
-      if (lower === suffix || lower.endsWith(withSlash)) {
-        matches.push(original);
-        if (matches.length > maxMatches) return { matches: [], ambiguous: true };
-      }
+    const directoryPrefixes: string[] = [];
+    for (const [lower, prefixes] of lowerToDirectoryPrefixes) {
+      if (lower !== suffix && !lower.endsWith(withSlash)) continue;
+      directoryPrefixes.push(...prefixes);
+      if (directoryPrefixes.length > maxMatches) break;
     }
-    if (matches.length > 0) return { matches, ambiguous: false };
+    if (directoryPrefixes.length === 0) continue;
+    if (directoryPrefixes.length !== 1 || directoryPrefixes.length > maxMatches) {
+      return { matches: [], directoryPrefixes: [], ambiguous: true };
+    }
+    return { matches: [], directoryPrefixes, ambiguous: false };
   }
-  return { matches: [], ambiguous: false };
+  return { matches: [], directoryPrefixes: [], ambiguous: false };
 }
 
 export function extractQueryPaths(
   query: string,
   indexedPaths: readonly string[],
-  opts: { maxPins?: number; maxMatchesPerSpan?: number } = {},
+  opts: {
+    maxPins?: number;
+    maxMatchesPerSpan?: number;
+    rootPath?: string;
+    consumeDirectories?: boolean;
+  } = {},
 ): QueryPathExtraction {
   const maxPins = Math.max(1, opts.maxPins ?? 8);
   const maxMatchesPerSpan = Math.max(1, opts.maxMatchesPerSpan ?? 3);
@@ -205,46 +327,186 @@ export function extractQueryPaths(
   // case-colliding pair, which is the existing file-view behavior too.
   const lowerToOriginal = new Map<string, string>();
   for (const p of indexedPaths) lowerToOriginal.set(p.toLowerCase(), p);
-
-  const tokens = query.split(/\s+/).filter(Boolean);
+  const tokenSpans = [...query.matchAll(/\S+/g)].map((match) => ({
+    raw: match[0]!,
+    start: match.index!,
+    end: match.index! + match[0]!.length,
+  }));
+  const tokens = tokenSpans.map((token) => token.raw);
+  const directoryNeedles = new Set<string>();
+  const indexedPathNeedsNormalization = indexedPaths.some((p) =>
+    p.includes('\\') || p.includes('//') || p.endsWith('/'));
+  let lowerToDirectoryPrefixes: Map<string, string[]> | undefined;
+  const ensureDirectoryNeedles = (normalized: string): void => {
+    const segments = normalized.toLowerCase().split('/').filter(Boolean);
+    let changed = false;
+    for (let drop = 0; drop < Math.min(segments.length, MAX_SUFFIX_TRIES); drop++) {
+      const needle = segments.slice(drop).join('/');
+      if (directoryNeedles.has(needle)) continue;
+      directoryNeedles.add(needle);
+      changed = true;
+    }
+    if (changed) lowerToDirectoryPrefixes = undefined;
+  };
+  const getDirectoryPrefixes = (): ReadonlyMap<string, readonly string[]> => {
+    if (lowerToDirectoryPrefixes) return lowerToDirectoryPrefixes;
+    lowerToDirectoryPrefixes = new Map<string, string[]>();
+    const needles = [...directoryNeedles];
+    const canonicalEntries = !indexedPathNeedsNormalization
+      ? [...lowerToOriginal.entries()]
+      : indexedPaths.map((p) => {
+        const normalized = normalizeSpan(p);
+        return [normalized.toLowerCase(), normalized] as const;
+      });
+    if (needles.length === 1) {
+      const needle = needles[0]!;
+      const marker = `/${needle}/`;
+      for (const [lower, canonicalPath] of canonicalEntries) {
+        if (lower.startsWith(`${needle}/`)) {
+          lowerToDirectoryPrefixes.set(needle, [canonicalPath.slice(0, needle.length)]);
+        }
+        let offset = lower.indexOf(marker);
+        while (offset >= 0) {
+          const prefix = canonicalPath.slice(0, offset + marker.length - 1);
+          const existing = lowerToDirectoryPrefixes.get(needle);
+          if (existing && !existing.includes(prefix)) existing.push(prefix);
+          else if (!existing) lowerToDirectoryPrefixes.set(needle, [prefix]);
+          offset = lower.indexOf(marker, offset + 1);
+        }
+      }
+      return lowerToDirectoryPrefixes;
+    }
+    for (const [lower, canonicalPath] of canonicalEntries) {
+      for (const needle of needles) {
+        const marker = `/${needle}/`;
+        if (lower.startsWith(`${needle}/`)) {
+          const existing = lowerToDirectoryPrefixes.get(needle);
+          const canonicalPrefix = canonicalPath.slice(0, needle.length);
+          if (existing && !existing.includes(canonicalPrefix)) existing.push(canonicalPrefix);
+          else if (!existing) lowerToDirectoryPrefixes.set(needle, [canonicalPrefix]);
+        }
+        let offset = lower.indexOf(marker);
+        while (offset >= 0) {
+          const prefix = canonicalPath.slice(0, offset + marker.length - 1);
+          const existing = lowerToDirectoryPrefixes.get(needle);
+          if (existing && !existing.includes(prefix)) existing.push(prefix);
+          else if (!existing) lowerToDirectoryPrefixes.set(needle, [prefix]);
+          offset = lower.indexOf(marker, offset + 1);
+        }
+      }
+    }
+    return lowerToDirectoryPrefixes;
+  };
   const consumed = new Set<number>();
   const pinned: string[] = [];
   const pinnedSeen = new Set<string>();
   const unresolved: string[] = [];
+  const pathAnchors: QueryPathAnchor[] = [];
+  const hardScope: QueryPathScope = { exactFiles: [], directoryPrefixes: [] };
+  let pathAnchorsTruncated = false;
+  const pathAnchorsTruncationReasons = new Set<QueryPathAnchorTruncationReason>();
+  let unexaminedTokenCount: number | undefined;
   let candidatesExamined = 0;
 
+  const recordAnchor = (
+    ordinal: number,
+    kind: QueryPathAnchorKind,
+    normalized: string,
+    status: QueryPathAnchorStatus,
+    resolvedFiles: readonly string[] = [],
+    directoryPrefix?: string,
+  ): void => {
+    const token = tokenSpans[ordinal]!;
+    pathAnchors.push({
+      raw: token.raw,
+      ordinal,
+      start: token.start,
+      end: token.end,
+      kind,
+      normalized,
+      status,
+      resolvedFiles: [...resolvedFiles],
+      ...(directoryPrefix === undefined ? {} : { directoryPrefix }),
+    });
+  };
+
+  const recordTruncation = (start: number, reason: QueryPathAnchorTruncationReason): void => {
+    pathAnchorsTruncated = true;
+    pathAnchorsTruncationReasons.add(reason);
+    unexaminedTokenCount = Math.max(unexaminedTokenCount ?? 0, tokens.length - start);
+  };
+
+  let basenameStems: Map<string, string[]> | null = null;
+  const getBasenameStems = (): ReadonlyMap<string, readonly string[]> => {
+    basenameStems ??= buildBasenameStems(indexedPaths);
+    return basenameStems;
+  };
+  let firstPassStop: { start: number; reason: QueryPathAnchorTruncationReason } | undefined;
+
   for (let i = 0; i < tokens.length; i++) {
-    if (pinned.length >= maxPins) break;
-    if (candidatesExamined >= MAX_CANDIDATE_SPANS) break;
+    if (pinned.length >= maxPins) {
+      firstPassStop = { start: i, reason: 'max-pins' };
+      break;
+    }
+    if (candidatesExamined >= MAX_CANDIDATE_SPANS) {
+      firstPassStop = { start: i, reason: 'candidate-cap' };
+      break;
+    }
     const stripped = stripWrapping(tokens[i]!);
     if (stripped.length < 4) continue;
-    const hasSlash = /[/\\]/.test(stripped);
-    if (!hasSlash && !DOTTED_BASENAME.test(stripped)) continue;
+    if (!isPathTokenShape(stripped)) continue;
 
-    const normalized = normalizeSpan(stripped);
+    const normalized = opts.rootPath === undefined
+      ? normalizeSpan(stripped)
+      : normalizeRootedSpan(stripped, opts.rootPath);
+    const directoryIntent = /[/\\]$/.test(stripped);
+    const exactIndexedPath = normalized === null
+      ? undefined
+      : lowerToOriginal.get(normalized.toLowerCase());
+    if (isSchemeLike(stripped) && exactIndexedPath === undefined) continue;
+    if (normalized === null) {
+      consumed.add(i);
+      if (unresolved.length < 4) unresolved.push(normalizeSpan(stripped));
+      recordAnchor(i, 'unresolved-path', normalizeSpan(stripped), 'outside-root');
+      candidatesExamined++;
+      continue;
+    }
     if (!normalized) continue;
     candidatesExamined++;
+    ensureDirectoryNeedles(normalized);
 
-    const { matches, ambiguous } = resolveSpan(
-      normalized.toLowerCase(), lowerToOriginal, maxMatchesPerSpan,
+    const { matches, directoryPrefixes, ambiguous } = resolveSpan(
+      normalized.toLowerCase(), lowerToOriginal, getDirectoryPrefixes, maxMatchesPerSpan, directoryIntent,
     );
     if (matches.length > 0) {
       consumed.add(i);
+      recordAnchor(i, 'file', normalized, 'resolved', matches);
       for (const m of matches) {
         if (pinnedSeen.has(m) || pinned.length >= maxPins) continue;
         pinnedSeen.add(m);
         pinned.push(m);
+        hardScope.exactFiles.push(m);
       }
-    } else if (ambiguous || isClearlyPathShaped(normalized)) {
+    } else if (directoryPrefixes.length > 0) {
+      if (opts.consumeDirectories) consumed.add(i);
+      recordAnchor(i, 'directory', normalized, 'resolved', [], directoryPrefixes[0]);
+      for (const prefix of directoryPrefixes) {
+        if (!hardScope.directoryPrefixes.includes(prefix)) hardScope.directoryPrefixes.push(prefix);
+      }
+    } else if (directoryIntent || ambiguous || isClearlyPathShaped(normalized)) {
       // A real path that didn't resolve to a usable set. Keeping it in the
       // query is strictly worse — its fragments are what minted the junk
       // matches this module exists to stop — so strip it and say so.
       consumed.add(i);
       if (unresolved.length < 4) unresolved.push(normalized);
+      recordAnchor(i, directoryIntent ? 'directory' : 'unresolved-path', normalized,
+        ambiguous ? 'ambiguous' : 'unresolved');
     }
     // Anything else (`and/or`, `call/2`, `foo.Bar`) is not a path reference:
     // leave the token for the normal matching pipeline.
   }
+
+  if (firstPassStop) recordTruncation(firstPassStop.start, firstPassStop.reason);
 
   // Second pass — extension-less kebab basenames. `background-image-table`
   // opens no door above (no slash, no dotted tail), the hyphens disqualify it
@@ -262,26 +524,44 @@ export function extractQueryPaths(
   // slashed/dotted pass so explicit paths win the shared maxPins budget, and
   // examines every remaining token: lookups are O(1) map hits, so the
   // scan-cost rationale behind MAX_CANDIDATE_SPANS doesn't apply.
-  let basenameStems: Map<string, string[]> | null = null;
-  for (let i = 0; i < tokens.length && pinned.length < maxPins; i++) {
+  let secondPassStop: number | undefined;
+  let secondPassLastExamined = -1;
+  for (let i = 0; i < tokens.length && !firstPassStop && pinned.length < maxPins; i++) {
+    secondPassLastExamined = i;
     if (consumed.has(i)) continue;
     const stripped = stripWrapping(tokens[i]!);
     if (stripped.length < 4 || !KEBAB_BASENAME.test(stripped)) continue;
-    basenameStems ??= buildBasenameStems(indexedPaths);
-    const matches = basenameStems.get(stripped.toLowerCase());
+    const matches = getBasenameStems().get(stripped.toLowerCase());
     if (!matches || matches.length > maxMatchesPerSpan) continue;
     consumed.add(i);
+    recordAnchor(i, 'file', normalizeSpan(stripped), 'resolved', matches);
     for (const m of matches) {
       if (pinnedSeen.has(m) || pinned.length >= maxPins) continue;
       pinnedSeen.add(m);
       pinned.push(m);
+      hardScope.exactFiles.push(m);
     }
   }
+  if (!firstPassStop && pinned.length >= maxPins) {
+    if (secondPassLastExamined >= 0 && secondPassLastExamined + 1 < tokens.length) {
+      secondPassStop = secondPassLastExamined + 1;
+    }
+  }
+  if (secondPassStop !== undefined) recordTruncation(secondPassStop, 'max-pins');
 
-  if (consumed.size === 0) return passthrough;
+  if (consumed.size === 0 && hardScope.exactFiles.length === 0 && hardScope.directoryPrefixes.length === 0) {
+    return passthrough;
+  }
   return {
     strippedQuery: tokens.filter((_, i) => !consumed.has(i)).join(' '),
     pinnedFiles: pinned,
     unresolvedPathSpans: unresolved,
+    ...(hardScope.exactFiles.length > 0 || hardScope.directoryPrefixes.length > 0 ? { hardScope } : {}),
+    ...(pathAnchors.length > 0 ? { pathAnchors } : {}),
+    ...(pathAnchorsTruncated ? {
+      pathAnchorsTruncated,
+      unexaminedTokenCount,
+      pathAnchorsTruncationReasons: [...pathAnchorsTruncationReasons],
+    } : {}),
   };
 }

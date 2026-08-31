@@ -38,6 +38,27 @@ export interface SqliteDatabase {
  */
 export type SqliteBackend = 'node-sqlite';
 
+type SqliteScalarCallback = (haystack: unknown, needle: unknown) => number;
+
+interface ScalarRegistrationCapability {
+  function(
+    name: string,
+    options: { deterministic?: boolean },
+    callback: SqliteScalarCallback,
+  ): void;
+}
+
+function requireScalarRegistration(raw: unknown): ScalarRegistrationCapability {
+  if (raw === null || typeof raw !== 'object') {
+    throw new Error('SQLite scalar registration unavailable: invalid database object');
+  }
+  const capability = raw as { function?: unknown };
+  if (typeof capability.function !== 'function') {
+    throw new Error('SQLite scalar registration unavailable: DatabaseSync.function is missing');
+  }
+  return capability as ScalarRegistrationCapability;
+}
+
 /**
  * Wraps Node's built-in `node:sqlite` (`DatabaseSync`) to match the
  * better-sqlite3 interface the rest of the code expects.
@@ -55,6 +76,27 @@ class NodeSqliteAdapter implements SqliteDatabase {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { DatabaseSync } = require('node:sqlite');
     this._db = opts?.readOnly ? new DatabaseSync(dbPath, { readOnly: true }) : new DatabaseSync(dbPath);
+
+    try {
+      const scalarDb = requireScalarRegistration(this._db);
+      scalarDb.function(
+        'codegraph_contains_ci',
+        { deterministic: true },
+        (haystack, needle) =>
+          typeof haystack === 'string' &&
+          typeof needle === 'string' &&
+          haystack.toLowerCase().includes(needle.toLowerCase())
+            ? 1
+            : 0,
+      );
+    } catch (error) {
+      try {
+        this._db.close();
+      } catch {
+        // DUMBAI: Preserve the capability or registration error as the construction failure.
+      }
+      throw error;
+    }
   }
 
   get open(): boolean {

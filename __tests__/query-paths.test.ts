@@ -39,6 +39,18 @@ const INDEX = [
   'src/d/user-profile.tsx',
 ];
 
+const DIRECTORY_INDEX = [
+  'src/anchor.ts',
+  'src/nested/child.ts',
+  'src-utils/helper.ts',
+];
+
+const AMBIGUOUS_DIRECTORY_INDEX = [
+  ...DIRECTORY_INDEX,
+  'packages/a/src/anchor.ts',
+  'packages/b/src/anchor.ts',
+];
+
 describe('queryMightContainPaths — the cheap pre-gate', () => {
   it('fires on slashes and dotted basenames', () => {
     expect(queryMightContainPaths('look at src/lib/chat-manager.ts')).toBe(true);
@@ -160,6 +172,10 @@ describe('extractQueryPaths — extension-less kebab basenames', () => {
     const out = extractQueryPaths('background-image-table Source column', INDEX);
     expect(out.pinnedFiles)
       .toEqual(['src/components/training-set-page/background-image-table.tsx']);
+    expect(out.hardScope).toEqual({
+      exactFiles: ['src/components/training-set-page/background-image-table.tsx'],
+      directoryPrefixes: [],
+    });
     expect(out.strippedQuery).toBe('Source column');
     expect(out.unresolvedPathSpans).toEqual([]);
   });
@@ -234,5 +250,367 @@ describe('extractQueryPaths — extension-less kebab basenames', () => {
     expect(out.pinnedFiles).toEqual(['src/lib/chat-manager.ts']);
     // The kebab token was not consumed once the budget was spent — it stays for FTS.
     expect(out.strippedQuery).toBe('background-image-table then');
+  });
+});
+
+describe('extractQueryPaths — internal directory scope', () => {
+  it('derives a hard directory scope from a trailing-slash path', () => {
+    const out = extractQueryPaths('inspect src/', DIRECTORY_INDEX);
+    expect(out.hardScope).toEqual({ exactFiles: [], directoryPrefixes: ['src'] });
+    expect(out.strippedQuery).toBe('inspect src/');
+  });
+
+  it('resolves a unique slash-bearing directory without a trailing slash', () => {
+    const out = extractQueryPaths('inspect src/nested', DIRECTORY_INDEX);
+    expect(out.hardScope).toEqual({ exactFiles: [], directoryPrefixes: ['src/nested'] });
+  });
+
+  it('resolves an in-root absolute directory to its canonical relative prefix', () => {
+    const out = extractQueryPaths('inspect /work/repo/src/nested', DIRECTORY_INDEX, {
+      rootPath: '/work/repo',
+    });
+    expect(out.hardScope).toEqual({ exactFiles: [], directoryPrefixes: ['src/nested'] });
+  });
+
+  it('does not treat URI or import-scheme tokens as path anchors', () => {
+    for (const q of ['inspect https://example.com/src', 'inspect pkg://example.com/src']) {
+      const out = extractQueryPaths(q, DIRECTORY_INDEX);
+      expect(out).toEqual({ strippedQuery: q, pinnedFiles: [], unresolvedPathSpans: [] });
+    }
+  });
+
+  it('records an in-root absolute file as an exact hard-scope member', () => {
+    const out = extractQueryPaths('inspect /work/repo/src/anchor.ts', DIRECTORY_INDEX, {
+      rootPath: '/work/repo',
+    });
+    expect(out.pinnedFiles).toEqual(['src/anchor.ts']);
+    expect(out.hardScope).toEqual({ exactFiles: ['src/anchor.ts'], directoryPrefixes: [] });
+  });
+
+  it('rejects outside-root and parent escapes without pinning', () => {
+    const outside = extractQueryPaths('inspect /work/other/src', DIRECTORY_INDEX, {
+      rootPath: '/work/repo',
+    });
+    expect(outside.pinnedFiles).toEqual([]);
+    expect(outside.hardScope).toBeUndefined();
+    expect(outside.unresolvedPathSpans).toContain('/work/other/src');
+
+    const escape = extractQueryPaths('inspect ../src', DIRECTORY_INDEX, {
+      rootPath: '/work/repo',
+    });
+    expect(escape.pinnedFiles).toEqual([]);
+    expect(escape.hardScope).toBeUndefined();
+    expect(escape.unresolvedPathSpans).toContain('../src');
+  });
+
+  it('keeps directory scope segment-aligned and excludes sibling prefixes', () => {
+    const out = extractQueryPaths('inspect src/', DIRECTORY_INDEX);
+    expect(out.hardScope?.directoryPrefixes).toEqual(['src']);
+    expect(out.hardScope?.directoryPrefixes).not.toContain('src-utils');
+  });
+
+  it('preserves directory text by default and consumes it only when opted in', () => {
+    const mixed = extractQueryPaths('inspect src/ and src/anchor.ts', DIRECTORY_INDEX);
+    expect(mixed.hardScope).toEqual({ exactFiles: ['src/anchor.ts'], directoryPrefixes: ['src'] });
+    expect(mixed.strippedQuery).toBe('inspect src/ and');
+
+    const consumed = extractQueryPaths('inspect src/ and src/anchor.ts', DIRECTORY_INDEX, {
+      consumeDirectories: true,
+    });
+    expect(consumed.hardScope).toEqual({ exactFiles: ['src/anchor.ts'], directoryPrefixes: ['src'] });
+    expect(consumed.strippedQuery).toBe('inspect and');
+  });
+
+  it('preserves Windows drive identity and rejects mismatches and drive-relative paths', () => {
+    const root = 'C:\\work\\repo';
+    const inRoot = extractQueryPaths('inspect C:\\WORK\\REPO\\src\\anchor.ts', DIRECTORY_INDEX, { rootPath: root });
+    expect(inRoot.pinnedFiles).toEqual(['src/anchor.ts']);
+
+    for (const q of ['inspect D:\\work\\repo\\src\\anchor.ts', 'inspect C:src\\anchor.ts']) {
+      const out = extractQueryPaths(q, DIRECTORY_INDEX, { rootPath: root });
+      expect(out.pinnedFiles).toEqual([]);
+      expect(out.hardScope).toBeUndefined();
+    }
+  });
+
+  it('keeps UNC and POSIX roots distinct while accepting separator variants', () => {
+    const unc = extractQueryPaths('inspect \\\\server\\share\\repo\\src\\anchor.ts', DIRECTORY_INDEX, {
+      rootPath: '\\\\server\\share\\repo',
+    });
+    expect(unc.pinnedFiles).toEqual(['src/anchor.ts']);
+
+    const wrongRoot = extractQueryPaths('inspect \\\\server\\share\\repo\\src\\anchor.ts', DIRECTORY_INDEX, {
+      rootPath: '/server/share/repo',
+    });
+    expect(wrongRoot.pinnedFiles).toEqual([]);
+    expect(wrongRoot.hardScope).toBeUndefined();
+  });
+
+  it('reports an ambiguous directory suffix without choosing one', () => {
+    const out = extractQueryPaths('inspect ./src/', AMBIGUOUS_DIRECTORY_INDEX);
+    expect(out.hardScope).toBeUndefined();
+    expect(out.unresolvedPathSpans).toContain('src');
+  });
+
+  it('resolves an exact indexed path containing a colon before scheme rejection', () => {
+    const out = extractQueryPaths('inspect foo:bar/baz.ts', ['foo:bar/baz.ts']);
+    expect(out.pinnedFiles).toEqual(['foo:bar/baz.ts']);
+  });
+
+  it('does not suffix-match an unresolved colon scheme token', () => {
+    const query = 'inspect foo:bar/missing.ts';
+    const out = extractQueryPaths(query, ['other/bar/missing.ts']);
+    expect(out).toEqual({ strippedQuery: query, pinnedFiles: [], unresolvedPathSpans: [] });
+  });
+
+  it('keeps one identity record per repeated alias while deduping pinned files', () => {
+    const query = 'inspect src/anchor.ts and ./src/anchor.ts';
+    const out = extractQueryPaths(query, DIRECTORY_INDEX);
+    expect(out.pinnedFiles).toEqual(['src/anchor.ts']);
+    expect(out.pathAnchors).toEqual([
+      {
+        raw: 'src/anchor.ts',
+        ordinal: 1,
+        start: 8,
+        end: 21,
+        kind: 'file',
+        normalized: 'src/anchor.ts',
+        status: 'resolved',
+        resolvedFiles: ['src/anchor.ts'],
+      },
+      {
+        raw: './src/anchor.ts',
+        ordinal: 3,
+        start: 26,
+        end: 41,
+        kind: 'file',
+        normalized: 'src/anchor.ts',
+        status: 'resolved',
+        resolvedFiles: ['src/anchor.ts'],
+      },
+    ]);
+  });
+
+  it('retains distinct file and directory identities for overlapping anchors', () => {
+    const out = extractQueryPaths('inspect src/ and src/anchor.ts', DIRECTORY_INDEX);
+    expect(out.pathAnchors).toEqual([
+      {
+        raw: 'src/',
+        ordinal: 1,
+        start: 8,
+        end: 12,
+        kind: 'directory',
+        normalized: 'src',
+        status: 'resolved',
+        resolvedFiles: [],
+        directoryPrefix: 'src',
+      },
+      {
+        raw: 'src/anchor.ts',
+        ordinal: 3,
+        start: 17,
+        end: 30,
+        kind: 'file',
+        normalized: 'src/anchor.ts',
+        status: 'resolved',
+        resolvedFiles: ['src/anchor.ts'],
+      },
+    ]);
+  });
+
+  it('records unresolved and outside-root attempts without inventing resolutions', () => {
+    const missing = extractQueryPaths('inspect src/missing.ts', DIRECTORY_INDEX);
+    expect(missing.pathAnchors).toEqual([
+      expect.objectContaining({
+        raw: 'src/missing.ts',
+        ordinal: 1,
+        kind: 'unresolved-path',
+        normalized: 'src/missing.ts',
+        status: 'unresolved',
+        resolvedFiles: [],
+      }),
+    ]);
+
+    const outside = extractQueryPaths('inspect /work/other/src/anchor.ts', DIRECTORY_INDEX, {
+      rootPath: '/work/repo',
+    });
+    expect(outside.pathAnchors).toEqual([
+      expect.objectContaining({
+        raw: '/work/other/src/anchor.ts',
+        kind: 'unresolved-path',
+        normalized: '/work/other/src/anchor.ts',
+        status: 'outside-root',
+        resolvedFiles: [],
+      }),
+    ]);
+  });
+
+  it('does not create anchor identities for URLs or dotted prose', () => {
+    for (const query of ['inspect https://example.com/src', 'inspect pkg://example.com/src', 'inspect foo.Bar']) {
+      expect(extractQueryPaths(query, DIRECTORY_INDEX).pathAnchors).toBeUndefined();
+    }
+  });
+
+  it('records canonical identities for colon and Windows-shaped exact files', () => {
+    const colon = extractQueryPaths('inspect foo:bar/baz.ts', ['foo:bar/baz.ts']);
+    expect(colon.pathAnchors).toEqual([
+      expect.objectContaining({
+        raw: 'foo:bar/baz.ts',
+        kind: 'file',
+        normalized: 'foo:bar/baz.ts',
+        status: 'resolved',
+        resolvedFiles: ['foo:bar/baz.ts'],
+      }),
+    ]);
+
+    const windows = extractQueryPaths('inspect C:\\WORK\\REPO\\src\\anchor.ts', DIRECTORY_INDEX, {
+      rootPath: 'C:\\work\\repo',
+    });
+    expect(windows.pathAnchors).toEqual([
+      expect.objectContaining({
+        raw: 'C:\\WORK\\REPO\\src\\anchor.ts',
+        kind: 'file',
+        normalized: 'src/anchor.ts',
+        status: 'resolved',
+        resolvedFiles: ['src/anchor.ts'],
+      }),
+    ]);
+  });
+
+  it('reports an exact token remainder when maxPins stops examination', () => {
+    const index = ['src/first.ts', 'src/second.ts', 'src/third.ts', 'src/fourth.ts'];
+    const query = 'inspect src/first.ts src/second.ts src/third.ts src/fourth.ts';
+    const out = extractQueryPaths(query, index, { maxPins: 1 });
+    expect(out.pinnedFiles).toEqual(['src/first.ts']);
+    expect(out.strippedQuery).toBe('inspect src/second.ts src/third.ts src/fourth.ts');
+    expect(out.pathAnchorsTruncated).toBe(true);
+    expect(out.unexaminedTokenCount).toBe(3);
+    expect(out.pathAnchorsTruncationReasons).toEqual(['max-pins']);
+    expect(out.pathAnchors).toHaveLength(1);
+  });
+
+  it('does not fabricate an anchor for an extensionless kebab token after maxPins', () => {
+    const index = ['src/first.ts', 'src/background-image-table.ts'];
+    const out = extractQueryPaths('inspect src/first.ts background-image-table', index, { maxPins: 1 });
+    expect(out.pinnedFiles).toEqual(['src/first.ts']);
+    expect(out.pathAnchorsTruncated).toBe(true);
+    expect(out.unexaminedTokenCount).toBe(1);
+    expect(out.pathAnchorsTruncationReasons).toEqual(['max-pins']);
+    expect(out.pathAnchors).toHaveLength(1);
+    expect(out.pathAnchors?.some((anchor) => anchor.raw === 'background-image-table')).toBe(false);
+  });
+
+  it('does not report truncation when maxPins is reached at the end of the query', () => {
+    const out = extractQueryPaths('inspect src/first.ts', ['src/first.ts'], { maxPins: 1 });
+    expect(out.pinnedFiles).toEqual(['src/first.ts']);
+    expect(out.pathAnchorsTruncated).toBeUndefined();
+    expect(out.unexaminedTokenCount).toBeUndefined();
+    expect(out.pathAnchorsTruncationReasons).toBeUndefined();
+  });
+
+  it('reports candidates beyond the bounded path scan without consuming their text', () => {
+    const index = Array.from({ length: 12 }, (_, i) => `src/p${i}.ts`);
+    const query = `inspect ${index.join(' ')}`;
+    const out = extractQueryPaths(query, index, { maxPins: 20 });
+    expect(out.pinnedFiles).toEqual(index.slice(0, 8));
+    expect(out.strippedQuery).toBe(`inspect ${index.slice(8).join(' ')}`);
+    expect(out.pathAnchorsTruncated).toBe(true);
+    expect(out.unexaminedTokenCount).toBe(4);
+    expect(out.pathAnchorsTruncationReasons).toEqual(['candidate-cap']);
+    expect(out.pathAnchors).toHaveLength(8);
+  });
+
+  it('treats trailing separators as directory intent over extensionless files', () => {
+    const withDescendant = extractQueryPaths('inspect src/', ['src', 'src/child.ts']);
+    expect(withDescendant.pinnedFiles).toEqual([]);
+    expect(withDescendant.hardScope).toEqual({ exactFiles: [], directoryPrefixes: ['src'] });
+    expect(withDescendant.pathAnchors).toEqual([
+      expect.objectContaining({ kind: 'directory', normalized: 'src', status: 'resolved' }),
+    ]);
+
+    const withoutDescendant = extractQueryPaths('inspect empty/', ['empty']);
+    expect(withoutDescendant.pinnedFiles).toEqual([]);
+    expect(withoutDescendant.pathAnchors).toEqual([
+      expect.objectContaining({ kind: 'directory', normalized: 'empty', status: 'unresolved' }),
+    ]);
+  });
+
+  it('preserves trailing directory intent for Windows drive and UNC roots', () => {
+    const drive = extractQueryPaths('inspect C:\\repo\\src\\', ['src/child.ts'], {
+      rootPath: 'C:\\repo',
+    });
+    expect(drive.hardScope).toEqual({ exactFiles: [], directoryPrefixes: ['src'] });
+    expect(drive.pathAnchors).toEqual([
+      expect.objectContaining({ kind: 'directory', normalized: 'src', status: 'resolved' }),
+    ]);
+
+    const unc = extractQueryPaths('inspect \\\\server\\share\\repo\\src\\', ['src/child.ts'], {
+      rootPath: '\\\\server\\share\\repo',
+    });
+    expect(unc.hardScope).toEqual({ exactFiles: [], directoryPrefixes: ['src'] });
+    expect(unc.pathAnchors).toEqual([
+      expect.objectContaining({ kind: 'directory', normalized: 'src', status: 'resolved' }),
+    ]);
+  });
+
+  it('reports the full bounded token remainder without classifying maxPins tail text', () => {
+    const index = ['src/first.ts', 'src/late.ts', 'src/child.ts'];
+    const query = 'inspect src/first.ts gen_server:call/2 and/or foo/bar call/2 src/late.ts src/missing.ts /work/repo/src/child.ts src/';
+    const out = extractQueryPaths(query, index, { maxPins: 1, rootPath: '/work/repo' });
+    expect(out.pinnedFiles).toEqual(['src/first.ts']);
+    expect(out.pathAnchorsTruncated).toBe(true);
+    expect(out.unexaminedTokenCount).toBe(8);
+    expect(out.pathAnchorsTruncationReasons).toEqual(['max-pins']);
+    expect(out.pathAnchors).toHaveLength(1);
+    expect(out.pathAnchors?.some((anchor) => anchor.raw === 'src/late.ts')).toBe(false);
+    expect(out.pathAnchors?.some((anchor) => anchor.raw === 'gen_server:call/2')).toBe(false);
+    expect(out.pathAnchors?.some((anchor) => anchor.raw === 'and/or')).toBe(false);
+  });
+
+  it('keeps candidate-cap truth at N-1, N, and N+1 without counting slash prose', () => {
+    const index = Array.from({ length: 9 }, (_, i) => `src/p${i}.ts`);
+    const falseTail = 'gen_server:call/2 and/or foo/bar call/2';
+    const extract = (count: number, includeFalseTail = true) => extractQueryPaths(
+      `inspect ${index.slice(0, count).join(' ')}${includeFalseTail ? ` ${falseTail}` : ''}`,
+      index,
+      { maxPins: 20 },
+    );
+
+    for (const count of [7, 8]) {
+      const out = extract(count, false);
+      expect(out.pathAnchorsTruncated).toBeUndefined();
+      expect(out.unexaminedTokenCount).toBeUndefined();
+      expect(out.pinnedFiles).toEqual(index.slice(0, count));
+    }
+    const over = extract(9);
+    expect(over.pathAnchorsTruncated).toBe(true);
+    expect(over.unexaminedTokenCount).toBe(5);
+    expect(over.pathAnchorsTruncationReasons).toEqual(['candidate-cap']);
+    expect(over.pathAnchors).toHaveLength(8);
+    expect(over.pathAnchors?.some((anchor) => anchor.raw === 'gen_server:call/2')).toBe(false);
+    expect(over.pathAnchors?.some((anchor) => anchor.raw === 'and/or')).toBe(false);
+    expect(over.pathAnchors?.some((anchor) => anchor.raw === 'foo/bar')).toBe(false);
+    expect(over.pathAnchors?.some((anchor) => anchor.raw === 'call/2')).toBe(false);
+  });
+
+  it('uses aggregate truncation for true path and ordinary tail tokens alike', () => {
+    const indexed = [
+      ...Array.from({ length: 8 }, (_, i) => `src/p${i}.ts`),
+      'src/late/child.ts',
+      'src/background-image-table.ts',
+    ];
+    const out = extractQueryPaths(
+      'inspect src/p0.ts src/p1.ts src/p2.ts src/p3.ts src/p4.ts src/p5.ts src/p6.ts src/p7.ts '
+        + 'src/late/child.ts background-image-table gen_server:call/2',
+      indexed,
+      { maxPins: 20 },
+    );
+    expect(out.pathAnchorsTruncated).toBe(true);
+    expect(out.unexaminedTokenCount).toBe(3);
+    expect(out.pathAnchorsTruncationReasons).toEqual(['candidate-cap']);
+    expect(out.pathAnchors).toHaveLength(8);
+    expect(out.pathAnchors?.some((anchor) => anchor.raw === 'src/late/child.ts')).toBe(false);
+    expect(out.pathAnchors?.some((anchor) => anchor.raw === 'background-image-table')).toBe(false);
+    expect(out.pathAnchors?.some((anchor) => anchor.raw === 'gen_server:call/2')).toBe(false);
   });
 });

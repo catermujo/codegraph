@@ -412,6 +412,30 @@ export interface Subgraph {
    * for graph traversals that don't run the search-ranking path.
    */
   confidence?: 'high' | 'low';
+
+  /** Internal exact-symbol resolutions used to preserve named anchors. */
+  symbolResolutions?: SymbolResolution[];
+}
+
+export type SymbolAnchorKind = 'identifier' | 'qualified';
+
+export interface SymbolAnchorCandidate {
+  nodeId: string;
+  filePath: string;
+  name: string;
+  qualifiedName: string;
+  kind: NodeKind;
+  startLine: number;
+  endLine: number;
+}
+
+export interface SymbolResolution {
+  raw: string;
+  normalized: string;
+  kind: SymbolAnchorKind;
+  status: 'zero' | 'one' | 'many';
+  candidates: SymbolAnchorCandidate[];
+  truncated: boolean;
 }
 
 /**
@@ -470,6 +494,9 @@ export interface SearchOptions {
 
   /** Include files from resolved transitive build.toml dependencies */
   includeDeps?: boolean;
+
+  /** DUMBAI: Internal exact-file gate; undefined is unrestricted, while [] matches nothing. */
+  allowedFilePaths?: readonly string[];
 }
 
 /**
@@ -731,4 +758,7 @@ export interface FindRelevantContextOptions {
 
   /** Include files from resolved transitive build.toml dependencies */
   includeDeps?: boolean;
+
+  /** DUMBAI: Internal exact-file gate; undefined is unrestricted, while [] matches nothing. */
+  allowedFilePaths?: readonly string[];
 }
