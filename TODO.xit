@@ -1,0 +1,33 @@
+CodeGraph usability validation
+[ ] !!! Replay CodeGraph calls from real Codex transcripts and classify every response as sufficient, partial, misleading, or abandoned #evaluation #usability
+    Record the next agent action so missing recall, unnecessary output, and fallback Read or Grep calls become concrete backlog items.
+[ ] !! Run real-repository agent A/B evaluations on small, medium, and large codebases with at least three flow prompts per repository #evaluation #agents
+    Judge whether CodeGraph answers stop further reading; keep latency measurements observational until performance becomes a priority again.
+[ ] !! Validate anchor and path behavior on Linux and a real Windows environment #cross-platform #testing
+    Cover Unicode path matching, POSIX roots, drive paths, UNC paths, symlinks, and SQLite scalar registration.
+
+Retrieval quality
+[ ] !! Track which query terms and retrieval channels justify every result so exact anchors and independent residual matches can be separated without name-prefix heuristics #retrieval #provenance
+[ ] !! Expand exact-anchor compatibility tests across supported language naming conventions #retrieval #languages
+    Include Rust and C++ qualifiers, C# and Java members, Swift symbols, snake case, acronyms, digits, and lower-camel fields.
+[?] ! Decide whether a uniquely resolved exact anchor should suppress same-family fuzzy relatives from generic pointer lists #retrieval #product-decision
+    Exact source is reserved today, but a fuzzy relative can still appear as an additional pointer.
+[ ] ! Evaluate semantic-index imports such as SCIP or Kythe only for graph gaps that tree-sitter and existing resolvers cannot close #research #semantic-index
+    Write a decision record and representative A/B first; do not import a database or protocol wholesale.
+[ ] ! Evaluate Zoekt or Tantivy-style lexical collection only after transcript evidence identifies broad-recall failures #research #search
+    Preserve exact-anchor precedence and avoid adding a second ranking system without a measured usability gain.
+
+Coverage and API cleanup
+[ ] !! Prove when a session back-reference satisfies anchor coverage by checking held ranges and fingerprints #coverage #sessions
+    Until this proof exists, keep pointer and back-reference coverage conservatively incomplete.
+[ ] ! Make the anchored coverage-note reservation adaptive so constrained responses retain more useful source while the note still survives the hard ceiling #coverage #rendering
+[ ] ! Move internal scope, symbol-resolution, and coverage fields behind internal TypeScript types where public compatibility permits #api #types
+[ ] ! Expose structured anchor coverage to evaluation and diagnostic tooling without leaking the internal emission side channel into public MCP responses #coverage #evaluation
+[?] ! Decide whether directory coverage should account for ignored or non-indexed descendants #coverage #product-decision
+    The current ledger measures scoped indexed files; any filesystem inventory must stay bounded, non-ingesting, and explicit about uncertainty.
+
+Landing and maintenance
+[ ] !! Review and merge commit 75222a7082c8b07aa0ba5354fd194fdcad77d0c9 from codex/codegraph-anchor-gates #review #git
+[ ] ! Add a plain-language entry under the Unreleased changelog section when the anchor-gate work lands #docs #release
+[ ] ! Profile large-index path and coverage work when performance becomes a product priority #performance #profiling
+    Use representative repositories and agent-visible sufficiency rather than microbenchmarks alone.
