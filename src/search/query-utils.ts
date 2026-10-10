@@ -8,6 +8,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Node } from '../types';
 
+export const VENDORED_RANK_PENALTY = 0.2;
+
+export function isVendoredFile(filePath: string): boolean {
+  return /(?:^|\/)(?:_?vendor|node_modules|third_party|third-party)\//i.test(filePath.replace(/\\/g, '/'));
+}
+
 /** Normalize a name to a comparable token: lowercase, alphanumerics only. */
 export function normalizeNameToken(raw: string): string {
   return raw.toLowerCase().replace(/[^a-z0-9]/g, '');

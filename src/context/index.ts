@@ -29,7 +29,7 @@ import { logDebug } from '../errors';
 import { validatePathWithinRoot, isConfigLeafNode } from '../utils';
 import {
   isTestFile, extractSearchTerms, scorePathRelevance, getStemVariants, isDistinctiveIdentifier,
-  blankNonAsciiWords, splitAtCjkSwitches, meetsQueryWordFloor,
+  blankNonAsciiWords, splitAtCjkSwitches, meetsQueryWordFloor, isVendoredFile, VENDORED_RANK_PENALTY,
 } from '../search/query-utils';
 import { splitIdentifierSegments } from '../search/identifier-segments';
 import { LOW_CONFIDENCE_MARKER } from './markers';
@@ -566,6 +566,12 @@ export class ContextBuilder {
 
     // Step 1: Extract potential symbol names from query
     const symbolsFromQuery = extractSymbolsFromQuery(query).slice(0, MAX_QUERY_SYMBOLS);
+    const distinctiveNames = new Set(symbolsFromQuery.filter(isDistinctiveIdentifier).map(name => name.toLowerCase()));
+    const vendorOnlyScope = scopedFiles !== undefined && scopedFiles.size > 0 && [...scopedFiles].every(isVendoredFile);
+    const retrievalScore = (result: SearchResult): number => result.score * (
+      !vendorOnlyScope && isVendoredFile(result.node.filePath)
+        && !distinctiveNames.has(result.node.name.toLowerCase()) ? VENDORED_RANK_PENALTY : 1
+    );
     logDebug('Extracted symbols from query', { query, symbols: symbolsFromQuery });
     const requiredAnchors = extractRequiredSymbolAnchors(query);
     const symbolResolutions: SymbolResolution[] = requiredAnchors.map((anchor) =>
@@ -852,7 +858,7 @@ export class ContextBuilder {
             ...result,
             score: result.score + (termHits - 1) * 5,
           }))
-          .sort((a, b) => b.score - a.score)
+          .sort((a, b) => retrievalScore(b) - retrievalScore(a))
           .slice(0, opts.searchLimit * 2);
       }
       logDebug('Text search results', { count: textResults.length });
@@ -1218,7 +1224,7 @@ export class ContextBuilder {
     // Final sort and truncation — all search channels (exact, text, CamelCase,
     // compound) have now contributed. Sort by score so multi-term matches from
     // later steps can outrank dampened single-term matches from earlier steps.
-    searchResults.sort((a, b) => b.score - a.score);
+    searchResults.sort((a, b) => retrievalScore(b) - retrievalScore(a));
     searchResults = searchResults.slice(0, opts.searchLimit * 3);
 
     // Filter by minimum score

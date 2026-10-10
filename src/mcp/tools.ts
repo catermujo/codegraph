@@ -36,7 +36,7 @@ import {
 } from '../sync/worktree';
 import type { PendingFile } from '../sync';
 import type { Node, Edge, SearchResult, Subgraph, NodeKind, Language } from '../types';
-import { isTestFile, isTestPath, normalizeNameToken, splitAtCjkSwitches, isQueryNameToken } from '../search/query-utils';
+import { isTestFile, isTestPath, normalizeNameToken, splitAtCjkSwitches, isQueryNameToken, isVendoredFile, VENDORED_RANK_PENALTY } from '../search/query-utils';
 import { groupDefinitions, isQualifiedSymbol, lastQualifierPart, matchesSymbol, qualifiedSymbolMatches } from '../graph/symbol-lookup';
 import { goPackageReaderFor } from '../graph/go-package';
 import {
@@ -5596,6 +5596,14 @@ export class ToolHandler {
     const isAmbientDeclaration = cg.ambientDeclarationFilePredicate(penaltyCandidates);
     const isDampedDeclaration = (filePath: string): boolean =>
       isAmbientDeclaration(filePath) && !namedTypeFiles.has(filePath);
+    const resolvedAnchorFiles = new Set([...requiredSymbolCandidates.values()]
+      .filter(candidates => candidates.length === 1).map(candidates => candidates[0]!.filePath));
+    const namedVendorFiles = new Set([...resolvedAnchorFiles, ...[...tierSeedIds].flatMap(id => {
+      const node = subgraph.nodes.get(id);
+      return node ? [node.filePath] : [];
+    })]);
+    const scopePaths = allowedFilePaths ?? (targetFiles === undefined ? undefined : [...targetFiles]);
+    const vendorOnlyScope = scopePaths !== undefined && scopePaths.length > 0 && scopePaths.every(isVendoredFile);
 
     /**
      * Rank penalty for a file, applied to its relevance score AND (below) to its
@@ -5616,7 +5624,9 @@ export class ToolHandler {
         isGeneratedCandidate(filePath) ? GENERATED_RANK_PENALTY : 1,
         isDampedDeclaration(filePath) ? AMBIENT_DECLARATION_RANK_PENALTY : 1,
       )
-      * (isLowValue(filePath) ? LOW_VALUE_RANK_PENALTY : 1);
+      * (isLowValue(filePath) ? LOW_VALUE_RANK_PENALTY : 1)
+      * (!vendorOnlyScope && isVendoredFile(filePath) && !pinnedSet.has(filePath)
+        && !namedVendorFiles.has(filePath) ? VENDORED_RANK_PENALTY : 1);
 
     for (const [filePath, group] of fileGroups) {
       group.score = (group.score + Math.min(PERIPHERAL_SCORE_CAP, group.peripheral))
@@ -5838,6 +5848,7 @@ export class ToolHandler {
     // in other files (`Validation.swift`), falls outside the budget, and the
     // agent Reads it. The named file is the answer — rank it at the top.
     const namedSeedFiles = new Set<string>();
+    for (const fp of resolvedAnchorFiles) namedSeedFiles.add(fp);
     for (const id of tierSeedIds) {
       const n = subgraph.nodes.get(id);
       if (n) namedSeedFiles.add(n.filePath);
@@ -8597,7 +8608,7 @@ export class ToolHandler {
       const note = coverage === undefined ? '' : `\n\n> ${formatExploreCoverage(coverage, noteLimit)}`;
       return { text: base.replace(SUMMARY_SENTINEL, `${summaryLine}${note}`), coverage };
     };
-    if (hasExplicitCoverage) {
+    {
       let rendered = renderSummaryAndCoverage(finalText);
       for (let attempt = 0; attempt < 3 && rendered.text.length > hardCeiling; attempt++) {
         const replacementOverhead = rendered.text.length - finalText.length;
@@ -8605,8 +8616,6 @@ export class ToolHandler {
         rendered = renderSummaryAndCoverage(finalText);
       }
       finalText = rendered.text;
-    } else {
-      finalText = finalText.replace(SUMMARY_SENTINEL, summaryFor(finalText));
     }
 
     // Emit the allocation diagnostic from the FINAL text, so per-file bytes and
