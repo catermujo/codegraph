@@ -4,8 +4,12 @@ CodeGraph usability validation
     The replay-explore.mjs runner now extracts literal calls, keeps observed next actions, and reports response metrics. Human sufficiency grading remains open.
 [ ] !! Run real-repository agent A/B evaluations on small, medium, and large codebases with at least three flow prompts per repository #evaluation #agents
     Judge whether CodeGraph answers stop further reading; keep latency measurements observational until performance becomes a priority again.
+    Eight Codex trials on odd are complete: two questions, two runs per arm.
+    The broad prompt fails the efficiency target. The exact control needs one explore on both builds.
+    The full repository-size and prompt matrix remains open. See docs/benchmarks/context-retrieval-validation.md.
 [ ] !! Validate anchor and path behavior on Linux and a real Windows environment #cross-platform #testing
     Cover Unicode path matching, POSIX roots, drive paths, UNC paths, symlinks, and SQLite scalar registration.
+    Linux validation passes 595 tests. Windows Node through Wine passes 27 tests. Native Windows remains unverified.
 
 Retrieval quality
 [ ] !! Track which query terms and retrieval channels justify every result so exact anchors and independent residual matches can be separated without name-prefix heuristics #retrieval #provenance

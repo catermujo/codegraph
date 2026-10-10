@@ -167,7 +167,7 @@ Static tree-sitter extraction misses computed/indirect calls, so flows break at 
 
 **Required** for every new language/framework: validate on small/medium/large real repos with >=3 flow prompts; deterministic probes (`scripts/agent-eval/probe-*.mjs`) then agent A/B (`scripts/agent-eval/run-all.sh` / `ab-new-vs-baseline.sh`). Pass bar: ~0 Read/Grep within the explore-call budget, faster than without-codegraph, no control-repo regression.
 
-Full methodology (feedback metrics, CLI contamination guard, Sonnet/`--effort high` model policy, daemon pre-warm), the Excalidraw worked example, and coverage matrix live in:
+Full methodology (feedback metrics, CLI contamination guard, host-specific model policy, daemon pre-warm), the Excalidraw worked example, and coverage matrix live in:
 - `docs/AGENTS.md` (nested; also loaded when cwd is under `docs/`)
 - `docs/design/dynamic-dispatch-coverage-playbook.md`
 - `docs/design/callback-edge-synthesis.md`

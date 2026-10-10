@@ -1,0 +1,2030 @@
+{
+  "date": "2026-10-10",
+  "cliVersion": "0.148.0",
+  "corpus": {
+    "files": 647,
+    "sha256": "4cc6175dff9e95b228dd829c27d8c91d190cfda9c0fab1440c9268b615c4fab9",
+    "indexedFiles": 486,
+    "vendoredIndexedFiles": 281
+  },
+  "questions": {
+    "flow": {
+      "agent": "codex",
+      "new": "e53244ac830741d8ef24e28d19686d35e2c5f898",
+      "baseline": "0b9236fa94f5b1f6037d234be57627da638fc150",
+      "target": "/tmp/codegraph-codex-eval/odd-source",
+      "task": "Explain how the fix style command orchestrates formatter declarations and imports, including dry-run handling and fallback behavior. Focus on Python orchestration, not the Odin transformation internals. Cite source lines for each stage. Keep the answer under 500 words."
+    },
+    "control": {
+      "agent": "codex",
+      "new": "e53244ac830741d8ef24e28d19686d35e2c5f898",
+      "baseline": "0b9236fa94f5b1f6037d234be57627da638fc150",
+      "target": "/tmp/codegraph-codex-eval/odd-source",
+      "task": "In fix/__init__.py, explain _run_style_path and _run_odinfmt_paths: stage order, dry-run handling, fallback when path discovery returns None or an empty list, and early failure returns. Cite source lines. Keep the answer under 350 words."
+    }
+  },
+  "methodology": {
+    "runsPerArmPerQuestion": 2,
+    "sequential": true,
+    "originalAndTrialSourcesUnchanged": true,
+    "reportedUsageOnly": true,
+    "residualContextOccupancy": null,
+    "cliPrevention": "sanitized PATH plus task constraint",
+    "cliValidation": "reject detected invocations including node/npx wrappers",
+    "repositoryFallbackClassification": "instruction-only commands excluded; mixed instruction/search commands included",
+    "allocation": "path citation share of rendered source sections; not proof of answer correctness"
+  },
+  "trials": [
+    {
+      "question": "flow",
+      "arm": "new",
+      "trial": 1,
+      "ok": true,
+      "errors": [],
+      "toolErrors": [],
+      "seconds": 62.314,
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "turns": 1,
+      "usage": {
+        "input_tokens": 622163,
+        "cached_input_tokens": 549632,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4373,
+        "reasoning_output_tokens": 2166
+      },
+      "tools": 20,
+      "mcp": 18,
+      "explores": 18,
+      "shellReads": 2,
+      "shellSearches": 0,
+      "shellOther": 0,
+      "cliAttempts": 0,
+      "mcpChars": 230583,
+      "shellChars": 8021,
+      "sufficiency": [
+        {
+          "query": "Explain how the fix style command orchestrates formatter declarations and imports, including dry-run handling and fallback behavior. Focus on Python orchestration, not Odin transformation internals.",
+          "next": "mcp"
+        },
+        {
+          "query": "fix style command formatter declarations imports dry run fallback Python",
+          "next": "mcp"
+        },
+        {
+          "query": "style command",
+          "next": "mcp"
+        },
+        {
+          "query": "formatter declarations",
+          "next": "mcp"
+        },
+        {
+          "query": "formatters imports",
+          "next": "mcp"
+        },
+        {
+          "query": "dry_run fallback",
+          "next": "mcp"
+        },
+        {
+          "query": "fix/style.py",
+          "next": "mcp"
+        },
+        {
+          "query": "fix style formatter",
+          "next": "mcp"
+        },
+        {
+          "query": "formatter import declaration",
+          "next": "mcp"
+        },
+        {
+          "query": "format_python",
+          "next": "mcp"
+        },
+        {
+          "query": "command format formatter import dry run fallback",
+          "next": "mcp"
+        },
+        {
+          "query": "command format formatter import dry run fallback",
+          "next": "mcp"
+        },
+        {
+          "query": "command format formatter import dry run fallback",
+          "next": "mcp"
+        },
+        {
+          "query": "style_command register _run_style_path _run_style_on_folder _run_odinfmt_paths resolve_odinfmt run_tool",
+          "next": "mcp"
+        },
+        {
+          "query": "RunTool run_tool fix register click_cli DRY_RUN",
+          "next": "mcp"
+        },
+        {
+          "query": "group_api.py RunTool",
+          "next": "mcp"
+        },
+        {
+          "query": "GROUP_MODULES fix_group odd.py",
+          "next": "shell-read"
+        },
+        {
+          "query": "fallback",
+          "next": "answer"
+        }
+      ],
+      "answer": "`fix style PATH` flow:\n\n1. `fix` registers as Odin group and receives Python tool runner `_execute_tool_by_name`; `style` command calls `_run_style_path`. ([odd.py:68](</tmp/codegraph-codex-eval/flow/t-new-1/odd.py:68>), [odd.py:248](</tmp/codegraph-codex-eval/flow/t-new-1/odd.py:248>), [fix/__init__.py:328](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:328>))\n\n2. Command chooses shader-only fallback first. `.slang` or `.inc` paths go directly to `_format_slang_path`. Paths with zero visible Odin files do the same. ([fix/__init__.py:207](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:207>), [fix/__init__.py:209](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:209>))\n\n3. For Odin work, it runs formatter declarations first: `fix_var_decl_style`. It previews command, passes `path` and dry-run state to injected `run_tool`, and stops immediately on nonzero status. ([fix/__init__.py:214](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:214>), [group_api.py:6](</tmp/codegraph-codex-eval/flow/t-new-1/group_api.py:6>), [fix/__init__.py:215](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:215>))\n\n4. If declarations succeed, it repeats same orchestration for imports via `normalize_imports`; failure prevents later formatters from running. ([fix/__init__.py:219](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:219>), [fix/__init__.py:220](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:220>))\n\n5. Only then does it resolve `odinfmt`. Dry run disables bootstrap and update, so missing formatter setup is not built. ([fix/__init__.py:224](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:224>)) Odin paths are previewed; dry run returns success without executing them. Normal mode uses a bounded thread pool and returns first failure. ([fix/__init__.py:49](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:49>), [fix/__init__.py:52](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:52>))\n\n6. Final shader pass runs on original path. Empty shader sets are harmless; missing paths or slang failures return `1` with an error. ([fix/__init__.py:230](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:230>), [fix/slang.py:159](</tmp/codegraph-codex-eval/flow/t-new-1/fix/slang.py:159>), [fix/__init__.py:115](</tmp/codegraph-codex-eval/flow/t-new-1/fix/__init__.py:115>)\n\nDry-run state comes from global argument parsing, which recognizes both `-dry-run` and `--dry-run`. ([systems.py:42](</tmp/codegraph-codex-eval/flow/t-new-1/systems.py:42>), [systems.py:50](</tmp/codegraph-codex-eval/flow/t-new-1/systems.py:50>))",
+      "repositoryFallbackShellCalls": 0,
+      "citationChecks": {
+        "count": 18,
+        "invalid": [],
+        "placeholderLinks": 0
+      },
+      "allocation": {
+        "envelope": 213800,
+        "usedPath": 82326,
+        "efficiencyPath": 0.3850608044901777,
+        "files": [
+          {
+            "path": "fix/slang.py",
+            "chars": 29026,
+            "calls": 5,
+            "via": "path"
+          },
+          {
+            "path": "fix/__init__.py",
+            "chars": 20536,
+            "calls": 2,
+            "via": "path"
+          },
+          {
+            "path": "odd.py",
+            "chars": 18217,
+            "calls": 4,
+            "via": "path"
+          },
+          {
+            "path": "repro_inspect.odin",
+            "chars": 12352,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "normalize_imports.odin",
+            "chars": 12193,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "odinfmt.py",
+            "chars": 10802,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "vet/imports.odin",
+            "chars": 10216,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "vet/struct_alignment.odin",
+            "chars": 9731,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "xcode/gen_project.py",
+            "chars": 9696,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "systems.py",
+            "chars": 9619,
+            "calls": 3,
+            "via": "path"
+          },
+          {
+            "path": "fuzz/response_stream.py",
+            "chars": 9267,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "android/run.py",
+            "chars": 7986,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "forge/run.py",
+            "chars": 6846,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "forge/inspect.py",
+            "chars": 5760,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "ios/run.py",
+            "chars": 5594,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "forge/check.py",
+            "chars": 5144,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "forge/actions.py",
+            "chars": 3648,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "sync_sdl_bindings.odin",
+            "chars": 3005,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "template/template.py",
+            "chars": 2928,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "ios/sim_create.py",
+            "chars": 2786,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "po.py",
+            "chars": 2723,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "parse/parse.odin",
+            "chars": 2520,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "dispatcher.odin",
+            "chars": 2049,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "vet/dead_fields.odin",
+            "chars": 1835,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "forge/__init__.py",
+            "chars": 1722,
+            "calls": 1,
+            "via": "path"
+          },
+          {
+            "path": "repro_broker_lambda/lambda_function.py",
+            "chars": 1454,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "android/__init__.py",
+            "chars": 1385,
+            "calls": 1,
+            "via": "path"
+          },
+          {
+            "path": "group_api.py",
+            "chars": 1204,
+            "calls": 1,
+            "via": "path"
+          },
+          {
+            "path": "android/device_list.py",
+            "chars": 948,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "repro_broker_lambda/package.py",
+            "chars": 886,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "fuzz/__init__.py",
+            "chars": 617,
+            "calls": 1,
+            "via": "path"
+          },
+          {
+            "path": "forgejo_release.py",
+            "chars": 522,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "forge/action.py",
+            "chars": 316,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "forge/capture.py",
+            "chars": 267,
+            "calls": 1,
+            "via": null
+          }
+        ]
+      },
+      "calls": [
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "Explain how the fix style command orchestrates formatter declarations and imports, including dry-run handling and fallback behavior. Focus on Python orchestration, not Odin transformation internals."
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "fix style command formatter declarations imports dry run fallback Python",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "style command",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "formatter declarations",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "formatters imports",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "dry_run fallback",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "fix/style.py",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "fix style formatter",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "formatter import declaration",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "format_python",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "scope": "fix",
+            "query": "command format formatter import dry run fallback",
+            "maxFiles": 20
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "scope": "odd/fix",
+            "query": "command format formatter import dry run fallback",
+            "maxFiles": 20
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "scope": "tools/fix",
+            "query": "command format formatter import dry run fallback",
+            "maxFiles": 20
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "style_command register _run_style_path _run_style_on_folder _run_odinfmt_paths resolve_odinfmt run_tool",
+            "scope": "fix",
+            "maxFiles": 4
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "RunTool run_tool fix register click_cli DRY_RUN",
+            "maxFiles": 8
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "group_api.py RunTool",
+            "maxFiles": 2
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "query": "GROUP_MODULES fix_group odd.py",
+            "scope": "odd.py",
+            "maxFiles": 2
+          },
+          "status": "completed"
+        },
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"sed -n '1,240p' /Users/wolfie/.config/opencode/instructions.md\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"sed -n '1,240p' /Users/wolfie/.dotfiles/agents/skills/caveman/SKILL.md\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-1",
+            "scope": "fix",
+            "query": "fallback",
+            "maxFiles": 4
+          },
+          "status": "completed"
+        }
+      ],
+      "manualSourceAudit": {
+        "pipelineOrder": true,
+        "dryRun": true,
+        "shaderFallback": true,
+        "missingPathFallbackCovered": false,
+        "method": "Read Python orchestration source and compare claims and line references"
+      }
+    },
+    {
+      "question": "flow",
+      "arm": "new",
+      "trial": 2,
+      "ok": true,
+      "errors": [],
+      "toolErrors": [],
+      "seconds": 124.778,
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "turns": 1,
+      "usage": {
+        "input_tokens": 698468,
+        "cached_input_tokens": 618240,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4899,
+        "reasoning_output_tokens": 2651
+      },
+      "tools": 23,
+      "mcp": 20,
+      "explores": 20,
+      "shellReads": 1,
+      "shellSearches": 2,
+      "shellOther": 0,
+      "cliAttempts": 0,
+      "mcpChars": 297164,
+      "shellChars": 11098,
+      "sufficiency": [
+        {
+          "query": "Explain the Python orchestration for the fix style command: command entrypoint, formatter declaration discovery, import generation/handling, dry-run behavior, and fallback behavior. Focus on Python code, not Odin transformation internals.",
+          "next": "mcp"
+        },
+        {
+          "query": "fix style command Python formatter declarations imports dry_run fallback format style command",
+          "next": "mcp"
+        },
+        {
+          "query": "format _Slangd _apply_edits request notify SlangFormatError formatter declaration import dry-run fallback",
+          "next": "mcp"
+        },
+        {
+          "query": "style formatter declarations imports command fix",
+          "next": "mcp"
+        },
+        {
+          "query": "formatter declarations",
+          "next": "mcp"
+        },
+        {
+          "query": "declared formatter",
+          "next": "mcp"
+        },
+        {
+          "query": "dry_run formatter",
+          "next": "mcp"
+        },
+        {
+          "query": "fallback formatter",
+          "next": "mcp"
+        },
+        {
+          "query": "imports formatter",
+          "next": "mcp"
+        },
+        {
+          "query": "test_fix_var_decl_style fix var declaration style Python command formatter imports dry run fallback",
+          "next": "mcp"
+        },
+        {
+          "query": "odinfmt.py resolve_odinfmt run formatter declaration imports dry run fallback",
+          "next": "shell-search"
+        },
+        {
+          "query": "fix_var_decl_style fix style command formatter declarations imports",
+          "next": "mcp"
+        },
+        {
+          "query": "fix style formatter declaration import dry run fallback command",
+          "next": "mcp"
+        },
+        {
+          "query": "fix style formatter declaration import dry run fallback command",
+          "next": "mcp"
+        },
+        {
+          "query": "fix style formatter declaration import dry run fallback command",
+          "next": "mcp"
+        },
+        {
+          "query": "fix style formatter declaration import dry run fallback command",
+          "next": "mcp"
+        },
+        {
+          "query": "fix style formatter declaration import dry run fallback command",
+          "next": "mcp"
+        },
+        {
+          "query": "_run_style_path _run_style_on_folder style_command register RunTool run_odinfmt format_slang_paths imports DRY_RUN",
+          "next": "mcp"
+        },
+        {
+          "query": "_execute_tool_by_name ODIN_GROUP_MODULES register fix run_tool dry run",
+          "next": "mcp"
+        },
+        {
+          "query": "OdinTool run dry_run binary execute",
+          "next": "answer"
+        }
+      ],
+      "answer": "`./tool fix style PATH` enters through Click registration, then calls `_run_style_path`; `-update` is accepted there. [fix/__init__.py:316\u2013330](/tmp/codegraph-codex-eval/flow/t-new-2/fix/__init__.py:316)\n\n1. Tool wiring: `odd.py` registers `fix` with `_execute_tool_by_name`. That dispatcher maps names such as `fix_var_decl_style` and `normalize_imports` to `OdinTool` instances and forwards `dry_run`. [odd.py:217\u2013223](/tmp/codegraph-codex-eval/flow/t-new-2/odd.py:217), [odd.py:245\u2013248](/tmp/codegraph-codex-eval/flow/t-new-2/odd.py:245)\n\n2. Path classification: `.slang` and `.inc` paths go straight to shader formatting. If Odin-path discovery returns an empty list, code also falls back to shader formatting. Otherwise it runs both Odin tools on the requested path, in order:\n\n   - `fix_var_decl_style`\n   - `normalize_imports`\n\n   Any nonzero result stops the pipeline immediately. [fix/__init__.py:205\u2013223](/tmp/codegraph-codex-eval/flow/t-new-2/fix/__init__.py:205)\n\n3. Odin formatter: after declarations and imports succeed, it resolves `odinfmt`. Normal execution permits bootstrap and `-update`; dry-run disables both. If discovery returned `None`\u2014for example, path does not exist\u2014it falls back to formatting the raw requested path as a single Odin path. [fix/__init__.py:224\u2013230](/tmp/codegraph-codex-eval/flow/t-new-2/fix/__init__.py:224)\n\n4. Formatter resolution fallback: `resolve_odinfmt` first honors `ODINFMT`, then uses an installed binary if valid, and otherwise builds one. In dry-run, bootstrap/build is disabled. [odinfmt.py:119\u2013137](/tmp/codegraph-codex-eval/flow/t-new-2/odinfmt.py:119)\n\n5. Dry-run behavior: global `DRY_RUN` comes from `-dry-run`/`--dry-run`. Each stage prints a command preview. `odinfmt` previews every file, then returns without spawning workers; Odin tools receive the same flag and handle preview-only execution. [systems.py:42\u201350](/tmp/codegraph-codex-eval/flow/t-new-2/systems.py:42), [fix/__init__.py:49\u201358](/tmp/codegraph-codex-eval/flow/t-new-2/fix/__init__.py:49)\n\nFinally, the command scans and formats any Slang sources under `PATH`; shader failures are caught and converted to exit code `1`. [fix/__init__.py:112\u2013125](/tmp/codegraph-codex-eval/flow/t-new-2/fix/__init__.py:112)",
+      "repositoryFallbackShellCalls": 2,
+      "citationChecks": {
+        "count": 9,
+        "invalid": [],
+        "placeholderLinks": 0
+      },
+      "allocation": {
+        "envelope": 274996,
+        "usedPath": 95514,
+        "efficiencyPath": 0.3473286884172861,
+        "files": [
+          {
+            "path": "fix/slang.py",
+            "chars": 41400,
+            "calls": 6,
+            "via": null
+          },
+          {
+            "path": "systems.py",
+            "chars": 28904,
+            "calls": 4,
+            "via": "path"
+          },
+          {
+            "path": "fix/__init__.py",
+            "chars": 28603,
+            "calls": 3,
+            "via": "path"
+          },
+          {
+            "path": "odd.py",
+            "chars": 23012,
+            "calls": 2,
+            "via": "path"
+          },
+          {
+            "path": "repro_inspect.odin",
+            "chars": 20577,
+            "calls": 5,
+            "via": null
+          },
+          {
+            "path": "fuzz/response_stream.py",
+            "chars": 18876,
+            "calls": 5,
+            "via": null
+          },
+          {
+            "path": "core.py",
+            "chars": 17809,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "odinfmt.py",
+            "chars": 14249,
+            "calls": 3,
+            "via": "path"
+          },
+          {
+            "path": "forge/run.py",
+            "chars": 11424,
+            "calls": 5,
+            "via": null
+          },
+          {
+            "path": "forge/check.py",
+            "chars": 11078,
+            "calls": 4,
+            "via": null
+          },
+          {
+            "path": "android/run.py",
+            "chars": 10299,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "forge/inspect.py",
+            "chars": 8408,
+            "calls": 5,
+            "via": null
+          },
+          {
+            "path": "ios/sim_create.py",
+            "chars": 7981,
+            "calls": 5,
+            "via": null
+          },
+          {
+            "path": "click_support.py",
+            "chars": 5468,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "vet/struct_alignment.odin",
+            "chars": 5343,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "ios/run.py",
+            "chars": 5262,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "vet/imports.odin",
+            "chars": 4736,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "forge/actions.py",
+            "chars": 3732,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "normalize_imports.odin",
+            "chars": 3572,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "forge/action_dsl.py",
+            "chars": 3517,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "__init__.py",
+            "chars": 746,
+            "calls": 1,
+            "via": "path"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"sed -n '1,240p' /Users/wolfie/.config/opencode/instructions.md && sed -n '1,240p' /Users/wolfie/.dotfiles/agents/skills/caveman/SKILL.md && if [ -d .codegraph ]; then echo CODEGRAPH_PRESENT; fi\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "query": "Explain the Python orchestration for the fix style command: command entrypoint, formatter declaration discovery, import generation/handling, dry-run behavior, and fallback behavior. Focus on Python code, not Odin transformation internals."
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "query": "fix style command Python formatter declarations imports dry_run fallback format style command"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "scope": "fix/slang.py",
+            "query": "format _Slangd _apply_edits request notify SlangFormatError formatter declaration import dry-run fallback"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "query": "style formatter declarations imports command fix"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "query": "formatter declarations"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "query": "declared formatter"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "query": "dry_run formatter"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "query": "fallback formatter"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "query": "imports formatter"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "query": "test_fix_var_decl_style fix var declaration style Python command formatter imports dry run fallback"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "scope": "odinfmt.py",
+            "query": "odinfmt.py resolve_odinfmt run formatter declaration imports dry run fallback"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"rg --files | rg '(\"'^|/)(fix|style|format|odinfmt)(/|'\"\\\\.|\"'$)'\"'\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"rg --files | sed -n '1,160p'\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "query": "fix_var_decl_style fix style command formatter declarations imports"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "scope": "core.py",
+            "query": "fix style formatter declaration import dry run fallback command"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "scope": "fix/__init__.py",
+            "query": "fix style formatter declaration import dry run fallback command"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "scope": "odd.py",
+            "query": "fix style formatter declaration import dry run fallback command"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "scope": "__init__.py",
+            "query": "fix style formatter declaration import dry run fallback command"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "scope": "click_support.py",
+            "query": "fix style formatter declaration import dry run fallback command"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "scope": "fix/__init__.py",
+            "query": "_run_style_path _run_style_on_folder style_command register RunTool run_odinfmt format_slang_paths imports DRY_RUN"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "scope": "odd.py",
+            "query": "_execute_tool_by_name ODIN_GROUP_MODULES register fix run_tool dry run"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-new-2",
+            "scope": "systems.py",
+            "query": "OdinTool run dry_run binary execute"
+          },
+          "status": "completed"
+        }
+      ],
+      "manualSourceAudit": {
+        "pipelineOrder": true,
+        "dryRun": true,
+        "shaderFallback": true,
+        "missingPathFallbackCovered": true,
+        "method": "Read Python orchestration source and compare claims and line references"
+      }
+    },
+    {
+      "question": "flow",
+      "arm": "baseline",
+      "trial": 1,
+      "ok": true,
+      "errors": [],
+      "toolErrors": [],
+      "seconds": 63.213,
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "turns": 1,
+      "usage": {
+        "input_tokens": 440677,
+        "cached_input_tokens": 374016,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3559,
+        "reasoning_output_tokens": 1854
+      },
+      "tools": 13,
+      "mcp": 10,
+      "explores": 10,
+      "shellReads": 0,
+      "shellSearches": 3,
+      "shellOther": 0,
+      "cliAttempts": 0,
+      "mcpChars": 160059,
+      "shellChars": 73509,
+      "sufficiency": [
+        {
+          "query": "Python fix style command orchestration formatter declarations imports dry-run fallback behavior",
+          "next": "mcp"
+        },
+        {
+          "query": "fix style format formatter declarations imports",
+          "next": "mcp"
+        },
+        {
+          "query": "fix command",
+          "next": "mcp"
+        },
+        {
+          "query": "style command",
+          "next": "shell-search"
+        },
+        {
+          "query": "_run_style_path _run_style_on_folder _run_odinfmt_paths register style_command _resolve_visible_odin_paths _resolve_visible_slang_paths _format_slang_path",
+          "next": "mcp"
+        },
+        {
+          "query": "RunTool odd.group_api",
+          "next": "mcp"
+        },
+        {
+          "query": "DRY_RUN click_cli",
+          "next": "mcp"
+        },
+        {
+          "query": "OdinTool run dry_run",
+          "next": "mcp"
+        },
+        {
+          "query": "RunTool",
+          "next": "mcp"
+        },
+        {
+          "query": "_execute_tool_by_name click_cli fix_group.register RunTool",
+          "next": "answer"
+        }
+      ],
+      "answer": "`fix style` is registered as Click command `style`, accepts `path` and `-update`, then delegates to `_run_style_path` [fix/__init__.py:316-332](/private/tmp/codegraph-codex-eval/flow/t-baseline-1/fix/__init__.py:316).\n\nFlow:\n\n1. It reads global `DRY_RUN`. `.slang` and `.inc` paths go directly to Slang formatting. If Odin discovery finds no visible Odin files, it also routes to Slang [fix/__init__.py:205-211](/private/tmp/codegraph-codex-eval/flow/t-baseline-1/fix/__init__.py:205).\n\n2. Otherwise it runs declaration normalization first:\n\n   `fix_var_decl_style`\n\n   A nonzero return stops orchestration immediately [fix/__init__.py:212-217](/private/tmp/codegraph-codex-eval/flow/t-baseline-1/fix/__init__.py:212).\n\n3. It then runs import normalization:\n\n   `normalize_imports`\n\n   Again, failure returns immediately; `odinfmt` does not run [fix/__init__.py:219-222](/private/tmp/codegraph-codex-eval/flow/t-baseline-1/fix/__init__.py:219).\n\n4. It resolves `odinfmt`. Dry-run disables both bootstrap and update. If Odin discovery returned `None`\u2014typically a nonexistent path\u2014it falls back to formatting the original path as a one-item list [fix/__init__.py:224-227](/private/tmp/codegraph-codex-eval/flow/t-baseline-1/fix/__init__.py:224). `odinfmt` previews each command, but skips execution during dry-run [fix/__init__.py:49-58](/private/tmp/codegraph-codex-eval/flow/t-baseline-1/fix/__init__.py:49).\n\n5. After Odin formatting succeeds, it attempts Slang formatting on the same input path [fix/__init__.py:227-230](/private/tmp/codegraph-codex-eval/flow/t-baseline-1/fix/__init__.py:227). Slang dry-run prints previews and returns success without writing; real failures become an error message and status `1` [fix/__init__.py:112-125](/private/tmp/codegraph-codex-eval/flow/t-baseline-1/fix/__init__.py:112).\n\nDiscovery excludes generated Odin files and paths under tool, vendor, asset, reference, and related trees [fix/__init__.py:61-89](/private/tmp/codegraph-codex-eval/flow/t-baseline-1/fix/__init__.py:61).",
+      "repositoryFallbackShellCalls": 3,
+      "citationChecks": {
+        "count": 9,
+        "invalid": [],
+        "placeholderLinks": 0
+      },
+      "allocation": {
+        "envelope": 146560,
+        "usedPath": 12208,
+        "efficiencyPath": 0.08329694323144105,
+        "files": [
+          {
+            "path": "systems.py",
+            "chars": 18227,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "_vendor/click/src/click/decorators.py",
+            "chars": 13593,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "fix/__init__.py",
+            "chars": 12208,
+            "calls": 1,
+            "via": "path"
+          },
+          {
+            "path": "odinfmt.py",
+            "chars": 9501,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "sync_sdl_bindings.odin",
+            "chars": 8860,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "fix/slang.py",
+            "chars": 7584,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "forge/run.py",
+            "chars": 6846,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "forge/actions.py",
+            "chars": 5921,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "android/run.py",
+            "chars": 5673,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/styles/named_styles.py",
+            "chars": 5471,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "dispatcher.odin",
+            "chars": 5450,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "forge/check.py",
+            "chars": 5144,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "forge/inspect.py",
+            "chars": 4788,
+            "calls": 3,
+            "via": null
+          },
+          {
+            "path": "_vendor/click/src/click/formatting.py",
+            "chars": 4537,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/styles/cell_style.py",
+            "chars": 3335,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/click/src/click/core.py",
+            "chars": 2983,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "template/template.py",
+            "chars": 2928,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "ios/sim_create.py",
+            "chars": 2786,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "ios/run.py",
+            "chars": 2622,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/worksheet/merge.py",
+            "chars": 2603,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "odd.py",
+            "chars": 2551,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "parse/parse.odin",
+            "chars": 2520,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/styles/borders.py",
+            "chars": 2101,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/styles/stylesheet.py",
+            "chars": 2036,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "repro_broker_lambda/package.py",
+            "chars": 1772,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "forge/parser.py",
+            "chars": 1765,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "group_api.py",
+            "chars": 1204,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/descriptors/base.py",
+            "chars": 761,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "android/device_list.py",
+            "chars": 474,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "forge/action.py",
+            "chars": 316,
+            "calls": 1,
+            "via": null
+          }
+        ]
+      },
+      "calls": [
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"pwd && sed -n '1,240p' /Users/wolfie/.config/opencode/instructions.md && sed -n '1,200p' /Users/wolfie/.dotfiles/agents/skills/caveman/SKILL.md && rg --files -g '.codegraph' -g 'pyproject.toml' -g '*.py' | head -80\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-1",
+            "query": "Python fix style command orchestration formatter declarations imports dry-run fallback behavior",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-1",
+            "query": "fix style format formatter declarations imports",
+            "maxFiles": 16
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-1",
+            "query": "fix command",
+            "maxFiles": 16
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-1",
+            "query": "style command",
+            "maxFiles": 16
+          },
+          "status": "completed"
+        },
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"rg -n -i \\\"fix.?style|formatter|dry.?run|fallback|import\\\" --glob '*.py' --glob '\"'!_vendor/**'\"' . | head -240\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc 'rg -n \"\" fix/__init__.py fix/*.py && rg -n \"format|import|declar|dry|fallback|style\" odd.py click_support.py odinfmt.py'",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-1",
+            "scope": "fix/__init__.py",
+            "query": "_run_style_path _run_style_on_folder _run_odinfmt_paths register style_command _resolve_visible_odin_paths _resolve_visible_slang_paths _format_slang_path",
+            "maxFiles": 4
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-1",
+            "query": "RunTool odd.group_api",
+            "maxFiles": 8
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-1",
+            "query": "DRY_RUN click_cli",
+            "maxFiles": 8
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-1",
+            "query": "OdinTool run dry_run",
+            "maxFiles": 8
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-1",
+            "scope": "group_api.py",
+            "query": "RunTool",
+            "maxFiles": 2
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-1",
+            "scope": "odd.py",
+            "query": "_execute_tool_by_name click_cli fix_group.register RunTool",
+            "maxFiles": 2
+          },
+          "status": "completed"
+        }
+      ],
+      "manualSourceAudit": {
+        "pipelineOrder": true,
+        "dryRun": true,
+        "shaderFallback": true,
+        "missingPathFallbackCovered": true,
+        "method": "Read Python orchestration source and compare claims and line references"
+      }
+    },
+    {
+      "question": "flow",
+      "arm": "baseline",
+      "trial": 2,
+      "ok": true,
+      "errors": [],
+      "toolErrors": [],
+      "seconds": 47.018,
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "turns": 1,
+      "usage": {
+        "input_tokens": 330404,
+        "cached_input_tokens": 282112,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3724,
+        "reasoning_output_tokens": 1713
+      },
+      "tools": 8,
+      "mcp": 7,
+      "explores": 7,
+      "shellReads": 1,
+      "shellSearches": 0,
+      "shellOther": 0,
+      "cliAttempts": 0,
+      "mcpChars": 111823,
+      "shellChars": 8123,
+      "sufficiency": [
+        {
+          "query": "How does the Python fix style command orchestrate formatter declarations and imports, including dry-run handling and fallback behavior? Find command entrypoint, formatter declaration parsing, import generation, dry-run, and fallback.",
+          "next": "mcp"
+        },
+        {
+          "query": "\"fix style\" formatter import dry_run fallback",
+          "next": "mcp"
+        },
+        {
+          "query": "formatter declaration imports dry_run fallback fix style command",
+          "next": "mcp"
+        },
+        {
+          "query": "fix/__init__.py imports RunTool _run_style_path _run_style_on_folder style_command register _run_odinfmt_paths _passthrough_args DRY_RUN",
+          "next": "mcp"
+        },
+        {
+          "query": "RunTool definition call fix_var_decl_style normalize_imports dry_run run_tool",
+          "next": "mcp"
+        },
+        {
+          "query": "RunTool CompleteToolArgs imports",
+          "next": "mcp"
+        },
+        {
+          "query": "imports",
+          "next": "answer"
+        }
+      ],
+      "answer": "`fix style` is a thin Python orchestrator. Click registers `style`, accepts `path` and `-update`, then delegates to `_run_style_path`.[fix/__init__.py:316](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:316) [fix/__init__.py:328](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:328)\n\nFor Odin paths, orchestration is sequential:\n\n1. Run `fix_var_decl_style`.\n2. Stop immediately if it returns nonzero.\n3. Run `normalize_imports`.\n4. Stop immediately on failure.\n5. Resolve `odinfmt`, then run it on discovered Odin files.\n6. Run Slang formatting afterward, allowing one path to contain both Odin and shader sources.[fix/__init__.py:214](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:214) [fix/__init__.py:215](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:215) [fix/__init__.py:217](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:217) [fix/__init__.py:219](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:219) [fix/__init__.py:220](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:220) [fix/__init__.py:224](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:224) [fix/__init__.py:227](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:227) [fix/__init__.py:230](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:230)\n\nThe standalone `declarations` and `imports` commands are generated from one loop. Their tool names are mapped to `fix_var_decl_style` and `normalize_imports`; arguments pass through unchanged, then `run_tool` receives the global dry-run flag.[fix/__init__.py:246](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:246) [fix/__init__.py:247](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:247) [fix/__init__.py:282](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:282) [fix/__init__.py:284](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:284)\n\nDry-run comes from global flag detection.[systems.py:42](/tmp/codegraph-codex-eval/flow/t-baseline-2/systems.py:42) [systems.py:50](/tmp/codegraph-codex-eval/flow/t-baseline-2/systems.py:50) Python prints previews, skips `odinfmt` execution, and returns success.[fix/__init__.py:49](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:49) [fix/__init__.py:52](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:52) Tool execution likewise prints the command without launching it.[systems.py:1875](/tmp/codegraph-codex-eval/flow/t-baseline-2/systems.py:1875) `odinfmt` bootstrap/update are disabled during dry-run.[odinfmt.py:140](/tmp/codegraph-codex-eval/flow/t-baseline-2/odinfmt.py:140)\n\nFallback: `.slang`/`.inc` inputs, or paths with no visible Odin files, go directly to Slang formatting.[fix/__init__.py:207](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:207) [fix/__init__.py:209](/tmp/codegraph-codex-codex-eval/flow/t-baseline-2/fix/__init__.py:209) [fix/__init__.py:211](/tmp/codegraph-codex-eval/flow/t-baseline-2/fix/__init__.py:211)",
+      "repositoryFallbackShellCalls": 0,
+      "citationChecks": {
+        "count": 23,
+        "invalid": [
+          {
+            "target": "/tmp/codegraph-codex-codex-eval/flow/t-baseline-2/fix/__init__.py:209",
+            "valid": false
+          }
+        ],
+        "placeholderLinks": 0
+      },
+      "allocation": {
+        "envelope": 101968,
+        "usedPath": 50648,
+        "efficiencyPath": 0.4967048485799466,
+        "files": [
+          {
+            "path": "fix/__init__.py",
+            "chars": 35747,
+            "calls": 3,
+            "via": "path"
+          },
+          {
+            "path": "fix/slang.py",
+            "chars": 9845,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "systems.py",
+            "chars": 9248,
+            "calls": 2,
+            "via": "path"
+          },
+          {
+            "path": "forge/parser.py",
+            "chars": 5653,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "odinfmt.py",
+            "chars": 5653,
+            "calls": 2,
+            "via": "path"
+          },
+          {
+            "path": "forge/taskset.py",
+            "chars": 5615,
+            "calls": 2,
+            "via": null
+          },
+          {
+            "path": "fix_var_decl_style.odin",
+            "chars": 5479,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "parse/parse.odin",
+            "chars": 3980,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/styles/named_styles.py",
+            "chars": 3835,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/worksheet/_reader.py",
+            "chars": 3285,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/styles/cell_style.py",
+            "chars": 3127,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/worksheet/merge.py",
+            "chars": 2166,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/attr/filters.py",
+            "chars": 2032,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/styles/stylesheet.py",
+            "chars": 1749,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/reader/workbook.py",
+            "chars": 1321,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "ass/serde.py",
+            "chars": 1303,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "group_api.py",
+            "chars": 1204,
+            "calls": 1,
+            "via": null
+          },
+          {
+            "path": "_vendor/poxl_deps/openpyxl/descriptors/base.py",
+            "chars": 726,
+            "calls": 1,
+            "via": null
+          }
+        ]
+      },
+      "calls": [
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"sed -n '1,240p' /Users/wolfie/.config/opencode/instructions.md && printf '\\\\n--- CAVEMAN ---\\\\n' && sed -n '1,240p' /Users/wolfie/.dotfiles/agents/skills/caveman/SKILL.md && printf '\\\\n--- ROOT ---\\\\n' && pwd && test -d .codegraph && echo '.codegraph present' || echo '.codegraph absent'\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-2",
+            "query": "How does the Python fix style command orchestrate formatter declarations and imports, including dry-run handling and fallback behavior? Find command entrypoint, formatter declaration parsing, import generation, dry-run, and fallback.",
+            "maxFiles": 12
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-2",
+            "query": "\"fix style\" formatter import dry_run fallback",
+            "maxFiles": 20
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-2",
+            "scope": "fix",
+            "query": "formatter declaration imports dry_run fallback fix style command",
+            "maxFiles": 20
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-2",
+            "scope": "fix/__init__.py",
+            "query": "fix/__init__.py imports RunTool _run_style_path _run_style_on_folder style_command register _run_odinfmt_paths _passthrough_args DRY_RUN",
+            "maxFiles": 4
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-2",
+            "query": "RunTool definition call fix_var_decl_style normalize_imports dry_run run_tool",
+            "maxFiles": 10
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-2",
+            "scope": "group_api.py",
+            "query": "RunTool CompleteToolArgs imports",
+            "maxFiles": 3
+          },
+          "status": "completed"
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/flow/t-baseline-2",
+            "scope": "fix/__init__.py",
+            "query": "imports",
+            "maxFiles": 2
+          },
+          "status": "completed"
+        }
+      ],
+      "manualSourceAudit": {
+        "pipelineOrder": true,
+        "dryRun": true,
+        "shaderFallback": true,
+        "missingPathFallbackCovered": false,
+        "method": "Read Python orchestration source and compare claims and line references"
+      }
+    },
+    {
+      "question": "control",
+      "arm": "new",
+      "trial": 1,
+      "ok": true,
+      "errors": [],
+      "toolErrors": [],
+      "seconds": 24.875,
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "turns": 1,
+      "usage": {
+        "input_tokens": 51848,
+        "cached_input_tokens": 28160,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1502,
+        "reasoning_output_tokens": 726
+      },
+      "tools": 2,
+      "mcp": 1,
+      "explores": 1,
+      "shellReads": 1,
+      "shellSearches": 0,
+      "shellOther": 0,
+      "cliAttempts": 0,
+      "mcpChars": 13664,
+      "shellChars": 5158,
+      "sufficiency": [
+        {
+          "query": "_run_style_path _run_odinfmt_paths fix/__init__.py",
+          "next": "shell-read"
+        }
+      ],
+      "answer": "`_run_style_path` stages work in this order:\n\n1. If the path ends in `.slang` or `.inc`, it immediately delegates to Slang formatting and stops ([fix/__init__.py:205-208](/tmp/codegraph-codex-eval/control/t-new-1/fix/__init__.py:205)).\n2. It discovers Odin files. An empty result (`[]`) falls back to Slang formatting; `None` does not\u2014it later falls back to formatting the original path with odinfmt ([fix/__init__.py:209-212](/tmp/codegraph-codex-eval/control/t-new-1/fix/__init__.py:209)).\n3. Runs `fix_var_decl_style`; any nonzero result returns immediately ([fix/__init__.py:214-217](/tmp/codegraph-codex-eval/control/t-new-1/fix/__init__.py:214)).\n4. Runs `normalize_imports`; any nonzero result also returns immediately ([fix/__init__.py:219-222](/tmp/codegraph-codex-eval/control/t-new-1/fix/__init__.py:219)).\n5. Resolves odinfmt, disabling bootstrap and updates during dry runs. If discovery returned `None`, it uses `[path]` as the odinfmt input ([fix/__init__.py:224-227](/tmp/codegraph-codex-eval/control/t-new-1/fix/__init__.py:224)).\n6. Runs odinfmt, returning immediately on failure, then formats the path as Slang ([fix/__init__.py:227-230](/tmp/codegraph-codex-eval/control/t-new-1/fix/__init__.py:227)).\n\n`_run_odinfmt_paths` first previews every command. It returns success without execution when dry-run is enabled or the path list is empty ([fix/__init__.py:49-53](/tmp/codegraph-codex-eval/control/t-new-1/fix/__init__.py:49)). Otherwise it runs paths concurrently and returns the first nonzero result, or `0` if all succeed ([fix/__init__.py:55-58](/tmp/codegraph-codex-eval/control/t-new-1/fix/__init__.py:55)). A missing formatter process result counts as failure (`1`); otherwise the subprocess return code propagates ([fix/__init__.py:42-46](/tmp/codegraph-codex-eval/control/t-new-1/fix/__init__.py:42).",
+      "repositoryFallbackShellCalls": 0,
+      "citationChecks": {
+        "count": 9,
+        "invalid": [],
+        "placeholderLinks": 0
+      },
+      "allocation": {
+        "envelope": 12208,
+        "usedPath": 12208,
+        "efficiencyPath": 1,
+        "files": [
+          {
+            "path": "fix/__init__.py",
+            "chars": 12208,
+            "calls": 1,
+            "via": "path"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/control/t-new-1",
+            "query": "_run_style_path _run_odinfmt_paths fix/__init__.py",
+            "scope": "fix/__init__.py",
+            "maxFiles": 6
+          },
+          "status": "completed"
+        },
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"sed -n '1,240p' /Users/wolfie/.config/opencode/instructions.md\"",
+          "status": "completed",
+          "exitCode": 0
+        }
+      ],
+      "manualSourceAudit": {
+        "pipelineOrder": true,
+        "dryRun": true,
+        "shaderFallback": true,
+        "missingPathFallbackCovered": true,
+        "method": "Read Python orchestration source and compare claims and line references"
+      }
+    },
+    {
+      "question": "control",
+      "arm": "new",
+      "trial": 2,
+      "ok": true,
+      "errors": [],
+      "toolErrors": [],
+      "seconds": 29.525,
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "turns": 1,
+      "usage": {
+        "input_tokens": 71275,
+        "cached_input_tokens": 47360,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1728,
+        "reasoning_output_tokens": 914
+      },
+      "tools": 2,
+      "mcp": 1,
+      "explores": 1,
+      "shellReads": 1,
+      "shellSearches": 0,
+      "shellOther": 0,
+      "cliAttempts": 0,
+      "mcpChars": 13721,
+      "shellChars": 8021,
+      "sufficiency": [
+        {
+          "query": "fix/__init__.py _run_style_path _run_odinfmt_paths path discovery dry run stage order early failure returns",
+          "next": "answer"
+        }
+      ],
+      "answer": "`_run_style_path` order:\n\n1. If path ends `.slang` or `.inc`, run Slang formatting immediately and return its result ([fix/__init__.py:205-208](/tmp/codegraph-codex-eval/control/t-new-2/fix/__init__.py:205)).\n2. Discover visible Odin paths. If result is empty, skip Odin stages and format Slang instead ([fix/__init__.py:209-211](/tmp/codegraph-codex-eval/control/t-new-2/fix/__init__.py:209)).\n3. Run `fix_var_decl_style`; nonzero result returns immediately ([fix/__init__.py:214-217](/tmp/codegraph-codex-eval/control/t-new-2/fix/__init__.py:214)).\n4. Run `normalize_imports`; nonzero result also returns immediately ([fix/__init__.py:219-222](/tmp/codegraph-codex-eval/control/t-new-2/fix/__init__.py:219)).\n5. Resolve `odinfmt`, disabling bootstrap and update during dry-run ([fix/__init__.py:224](/tmp/codegraph-codex-eval/control/t-new-2/fix/__init__.py:224)).\n6. If discovery returned `None`, fall back to `[path]`; then run `odinfmt`. A nonzero result returns immediately. Finally, run Slang formatting ([fix/__init__.py:225-230](/tmp/codegraph-codex-eval/control/t-new-2/fix/__init__.py:225)).\n\n`_run_odinfmt_paths` previews every command first, even during dry-run ([fix/__init__.py:49-51](/tmp/codegraph-codex-eval/control/t-new-2/fix/__init__.py:49)). Dry-run, or an empty path list, returns success without executing anything ([fix/__init__.py:52-53](/tmp/codegraph-codex-eval/control/t-new-2/fix/__init__.py:52)). Otherwise it runs paths concurrently, with at most 32 workers, then returns the first nonzero result in path order\u2014or `0` if all succeed ([fix/__init__.py:55-58](/tmp/codegraph-codex-eval/control/t-new-2/fix/__init__.py:55)). No per-path early stop: all workers run.",
+      "repositoryFallbackShellCalls": 0,
+      "citationChecks": {
+        "count": 9,
+        "invalid": [],
+        "placeholderLinks": 0
+      },
+      "allocation": {
+        "envelope": 12208,
+        "usedPath": 12208,
+        "efficiencyPath": 1,
+        "files": [
+          {
+            "path": "fix/__init__.py",
+            "chars": 12208,
+            "calls": 1,
+            "via": "path"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"sed -n '1,240p' /Users/wolfie/.config/opencode/instructions.md && sed -n '1,200p' /Users/wolfie/.dotfiles/agents/skills/caveman/SKILL.md\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/control/t-new-2",
+            "scope": "fix/__init__.py",
+            "query": "fix/__init__.py _run_style_path _run_odinfmt_paths path discovery dry run stage order early failure returns"
+          },
+          "status": "completed"
+        }
+      ],
+      "manualSourceAudit": {
+        "pipelineOrder": true,
+        "dryRun": true,
+        "shaderFallback": true,
+        "missingPathFallbackCovered": true,
+        "method": "Read Python orchestration source and compare claims and line references"
+      }
+    },
+    {
+      "question": "control",
+      "arm": "baseline",
+      "trial": 1,
+      "ok": true,
+      "errors": [],
+      "toolErrors": [],
+      "seconds": 31.084,
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "turns": 1,
+      "usage": {
+        "input_tokens": 92705,
+        "cached_input_tokens": 67584,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1960,
+        "reasoning_output_tokens": 1166
+      },
+      "tools": 3,
+      "mcp": 1,
+      "explores": 1,
+      "shellReads": 2,
+      "shellSearches": 0,
+      "shellOther": 0,
+      "cliAttempts": 0,
+      "mcpChars": 13669,
+      "shellChars": 8021,
+      "sufficiency": [
+        {
+          "query": "_run_style_path _run_odinfmt_paths fix/__init__.py",
+          "next": "shell-read"
+        }
+      ],
+      "answer": "`_run_style_path` order:\n\n1. Set `dry_run` from global `DRY_RUN` [source: line 206](...).\n2. `.slang`/`.inc` paths go straight to shader formatting [line 207](...).\n3. Discover visible Odin paths [line 209](...).\n4. Empty discovery result (`[]`) skips Odin stages and runs shader formatting [lines 210\u2013211](...).\n5. Run `fix_var_decl_style`, then `normalize_imports` [lines 214\u2013222](...).\n6. Resolve `odinfmt`; dry-run disables bootstrap and update [line 224](...).\n7. If discovery returned `None`, use original `path` as odinfmt input [lines 225\u2013227](...).\n8. Run odinfmt. Nonzero result returns immediately [lines 227\u2013229](...).\n9. Run shader formatting last [line 230](...).\n\nEarly failures: either Odin tool\u2019s nonzero result returns immediately [lines 215\u2013217](...), [lines 220\u2013222](...); odinfmt failure also returns immediately [lines 227\u2013229](...). A `None` discovery result is not itself an early failure. It falls back to `[path]` only for odinfmt, then shader formatting may report failure.\n\n`_run_odinfmt_paths` first previews every command, even in dry-run mode [lines 50\u201351](...). Then `dry_run` or an empty `paths` list returns success (`0`) without starting workers [lines 52\u201353](...). For nonempty, real execution runs paths concurrently [lines 55\u201357](...). It returns first nonzero formatter result, or `0` if all succeed [line 58](...).\n\n[fix/__init__.py]( /tmp/codegraph-codex-eval/control/t-baseline-1/fix/__init__.py )",
+      "repositoryFallbackShellCalls": 0,
+      "citationChecks": {
+        "count": 0,
+        "invalid": [],
+        "placeholderLinks": 16
+      },
+      "allocation": {
+        "envelope": 12208,
+        "usedPath": 12208,
+        "efficiencyPath": 1,
+        "files": [
+          {
+            "path": "fix/__init__.py",
+            "chars": 12208,
+            "calls": 1,
+            "via": "path"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/control/t-baseline-1",
+            "scope": "fix/__init__.py",
+            "query": "_run_style_path _run_odinfmt_paths fix/__init__.py"
+          },
+          "status": "completed"
+        },
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"sed -n '1,240p' /Users/wolfie/.config/opencode/instructions.md\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"sed -n '1,240p' /Users/wolfie/.dotfiles/agents/skills/caveman/SKILL.md\"",
+          "status": "completed",
+          "exitCode": 0
+        }
+      ],
+      "manualSourceAudit": {
+        "pipelineOrder": true,
+        "dryRun": true,
+        "shaderFallback": true,
+        "missingPathFallbackCovered": true,
+        "method": "Read Python orchestration source and compare claims and line references"
+      }
+    },
+    {
+      "question": "control",
+      "arm": "baseline",
+      "trial": 2,
+      "ok": true,
+      "errors": [],
+      "toolErrors": [],
+      "seconds": 38.765,
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "turns": 1,
+      "usage": {
+        "input_tokens": 89218,
+        "cached_input_tokens": 77568,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1929,
+        "reasoning_output_tokens": 1138
+      },
+      "tools": 3,
+      "mcp": 1,
+      "explores": 1,
+      "shellReads": 2,
+      "shellSearches": 0,
+      "shellOther": 0,
+      "cliAttempts": 0,
+      "mcpChars": 13653,
+      "shellChars": 9433,
+      "sufficiency": [
+        {
+          "query": "_run_style_path _run_odinfmt_paths",
+          "next": "answer"
+        }
+      ],
+      "answer": "`_run_style_path` order:\n\n1. Read global `DRY_RUN` state (line 206).\n2. `.slang`/`.inc` paths go straight to Slang formatting (lines 207\u2013208).\n3. Discover visible Odin paths (line 209).\n   - `[]`: treat path as Slang input; return immediately (lines 210\u2013211).\n   - `None`: continue Odin stages, then fall back to `[path]` for `odinfmt` (lines 224\u2013227).\n4. Run `fix_var_decl_style`; nonzero result returns immediately (lines 214\u2013217).\n5. Run `normalize_imports`; nonzero result returns immediately (lines 219\u2013222).\n6. Resolve `odinfmt`. Dry-run disables bootstrap and update (line 224).\n7. Run `_run_odinfmt_paths`; nonzero result returns immediately (lines 227\u2013229).\n8. Run Slang formatting last (line 230).\n\n`_run_odinfmt_paths` first prints one preview per path, regardless of dry-run state (lines 49\u201351). Then:\n\n- If `dry_run` is true, returns `0` without executing `odinfmt`.\n- If `paths` is empty, also returns `0`; no worker pool starts (lines 52\u201353).\n- Otherwise, runs paths concurrently with bounded worker count (lines 55\u201357).\n- Returns first nonzero formatter result, preserving input/result order; returns `0` if all succeed (line 58).\n\nIndividual `odinfmt` execution uses `check=False`; missing process result becomes failure `1`, otherwise subprocess return code passes through (lines 42\u201346).\n\nSource: [fix/__init__.py:205](/tmp/codegraph-codex-eval/control/t-baseline-2/fix/__init__.py:205), [fix/__init__.py:49](/tmp/codegraph-codex-eval/control/t-baseline-2/fix/__init__.py:49).",
+      "repositoryFallbackShellCalls": 0,
+      "citationChecks": {
+        "count": 2,
+        "invalid": [],
+        "placeholderLinks": 0
+      },
+      "allocation": {
+        "envelope": 12208,
+        "usedPath": 12208,
+        "efficiencyPath": 1,
+        "files": [
+          {
+            "path": "fix/__init__.py",
+            "chars": 12208,
+            "calls": 1,
+            "via": "path"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"sed -n '1,240p' /Users/wolfie/.dotfiles/agents/skills/coding/SKILL.md && sed -n '1,240p' /Users/wolfie/.config/opencode/instructions.md\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "command_execution",
+          "command": "/bin/zsh -lc \"sed -n '1,220p' /Users/wolfie/.dotfiles/agents/skills/caveman/SKILL.md\"",
+          "status": "completed",
+          "exitCode": 0
+        },
+        {
+          "type": "mcp_tool_call",
+          "tool": "codegraph_explore",
+          "arguments": {
+            "projectPath": "/tmp/codegraph-codex-eval/control/t-baseline-2",
+            "query": "_run_style_path _run_odinfmt_paths",
+            "scope": "fix/__init__.py",
+            "maxFiles": 6
+          },
+          "status": "completed"
+        }
+      ],
+      "manualSourceAudit": {
+        "pipelineOrder": true,
+        "dryRun": true,
+        "shaderFallback": true,
+        "missingPathFallbackCovered": true,
+        "method": "Read Python orchestration source and compare claims and line references"
+      }
+    }
+  ]
+}
