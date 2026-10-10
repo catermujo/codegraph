@@ -2942,7 +2942,7 @@ export class ToolHandler {
    * comparison the sync fast path uses); only on a stat mismatch is the
    * content hashed (sha256, matching extraction's `hashContent`) so a
    * touch/checkout that rewrote identical bytes never false-positives.
-   * Results are memoized briefly so one response rendering the same file in
+   * Results are memoized within a tool call so rendering the same file in
    * several sections pays for the check once.
    *
    * Returns true when the on-disk file differs from what was indexed —
@@ -2967,6 +2967,63 @@ export class ToolHandler {
     const stale = fileDrift(cg, relPath, content) === 'changed';
     this.driftCache.set(key, { at: now, stale });
     return stale;
+  }
+
+  /** Refresh named files before resolving or slicing their indexed symbols. */
+  private async refreshExploreAnchors(cg: CodeGraph, args: Record<string, unknown>): Promise<void> {
+    // DUMBAI: Query workers are readers. Only the owning writer repairs the cache before dispatch.
+    if (cg.isReadOnly?.() !== false || cg.isWatcherDegraded?.()) return;
+    const query = this.validateString(args.query, 'query');
+    if (typeof query !== 'string') return;
+    const rawTarget = this.validateOptionalPath(args.target, 'target');
+    if (typeof rawTarget !== 'string' && rawTarget !== undefined) return;
+    const target = rawTarget === undefined ? null : cg.getTarget(rawTarget);
+    if (rawTarget !== undefined && !target) return;
+    const targetFiles = target === null ? undefined
+      : new Set(cg.getTargetFilesForScope(target.path, args.includeDeps === true));
+    const MAX_FILES = 8;
+    const MAX_BYTES = 8 * 1024 * 1024;
+    const candidates = new Set<string>();
+    let scope: ReturnType<typeof extractQueryPaths>['hardScope'];
+    if (queryMightContainPaths(query)) {
+      const files = targetFiles ? [...targetFiles] : cg.getFiles().map(file => file.path);
+      const extraction = extractQueryPaths(query, files, {
+        rootPath: cg.getProjectRoot(), maxPins: MAX_FILES, consumeDirectories: true,
+        symbolFiles: symbol => filesDefiningSymbol(cg, symbol),
+      });
+      if (extraction.unresolvedPathSpans.length > 0) return;
+      scope = extraction.hardScope;
+      for (const file of extraction.pinnedFiles) candidates.add(file);
+    }
+    for (const token of normalizeQuerySpelling(query).split(/[^\w$.:]+/).slice(0, 16)) {
+      if (!/^[A-Za-z_$][\w$]*(?:(?:::|\.)[\w$]+)*$/.test(token)) continue;
+      const files = [...new Set(filesDefiningSymbol(cg, token))].filter(file =>
+        (targetFiles === undefined || targetFiles.has(file))
+        && (scope === undefined || scope.exactFiles.includes(file)
+          || scope.directoryPrefixes.some(prefix => file === prefix || file.startsWith(`${prefix}/`))));
+      // DUMBAI: Broad or ambiguous families must not turn a read into a repository-wide sync.
+      if (new Set([...candidates, ...files]).size > MAX_FILES) continue;
+      for (const file of files) candidates.add(file);
+    }
+    const stale: string[] = [];
+    let bytes = 0;
+    for (const file of candidates) {
+      const absolute = validatePathWithinRoot(cg.getProjectRoot(), file);
+      if (absolute === null) continue;
+      let size = 0;
+      try { size = statSync(absolute).size; } catch { continue; }
+      if (bytes + size > MAX_BYTES) continue;
+      bytes += size;
+      if (this.isFileStaleOnDisk(cg, file)) stale.push(file);
+    }
+    if (stale.length === 0) return;
+    try {
+      await cg.sync({ paths: stale });
+    } catch (error) {
+      // DUMBAI: A busy or failed writer leaves the existing stale-source guard in force.
+      process.stderr.write(`[CodeGraph MCP] Anchor refresh failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+    this.driftCache.clear();
   }
 
   private answerResult(cg: CodeGraph, text: string, paths: Iterable<string>): ToolResult {
@@ -3188,6 +3245,9 @@ export class ToolHandler {
         process.stderr.write('[CodeGraph MCP] Re-armed file watcher; full catch-up pending.\n');
       }
 
+      this.driftCache.clear();
+      if (toolName === 'codegraph_explore') await this.refreshExploreAnchors(project, args);
+
       // codegraph_status reports watcher state (pending files, degraded mode,
       // worktree warning) and embeds its own sections — it must run on the MAIN
       // thread against the watched default instance, so it is NEVER off-loaded to
@@ -3374,6 +3434,7 @@ export class ToolHandler {
    * path validation already ran in {@link execute} before routing here.
    */
   async executeReadTool(toolName: string, args: Record<string, unknown>): Promise<ToolResult> {
+    this.driftCache.clear();
     try {
       return await this.dispatchTool(toolName, args);
     } catch (err) {

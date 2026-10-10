@@ -1,6 +1,7 @@
 CodeGraph usability validation
 [ ] !!! Replay CodeGraph calls from real Codex transcripts and classify every response as sufficient, partial, misleading, or abandoned #evaluation #usability
     Record the next agent action so missing recall, unnecessary output, and fallback Read or Grep calls become concrete backlog items.
+    The replay-explore.mjs runner now extracts literal calls, keeps observed next actions, and reports response metrics. Human sufficiency grading remains open.
 [ ] !! Run real-repository agent A/B evaluations on small, medium, and large codebases with at least three flow prompts per repository #evaluation #agents
     Judge whether CodeGraph answers stop further reading; keep latency measurements observational until performance becomes a priority again.
 [ ] !! Validate anchor and path behavior on Linux and a real Windows environment #cross-platform #testing

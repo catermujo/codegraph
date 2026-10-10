@@ -657,6 +657,11 @@ export class CodeGraph {
     return this.projectRoot;
   }
 
+  /** Whether this handle can update its derived index. */
+  isReadOnly(): boolean {
+    return this.db.readOnly;
+  }
+
   // ===========================================================================
   // Indexing
   // ===========================================================================

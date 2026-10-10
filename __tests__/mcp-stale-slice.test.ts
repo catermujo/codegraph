@@ -18,12 +18,14 @@
  * issue was filed against.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import CodeGraph from '../src/index';
 import { ToolHandler, __setLoadCodeGraphForTests } from '../src/mcp/tools';
+import { QueryPool } from '../src/mcp/query-pool';
+import { Worker } from 'worker_threads';
 
 /** ~1,100-line file: handler0…handler79 plus `orchestrate` at the bottom —
  * mirrors the issue's fixture. Big enough that explore takes the clustered
@@ -167,19 +169,64 @@ describe('MCP stale-slice guard (#1474)', () => {
     expect(text).toContain('export function orchestrate');
   });
 
-  it('codegraph_explore omits (never mis-slices) a big drifted file and flags line refs', async () => {
+  it.each([false, true])('refreshes exact symbols before rendering a shifted cross-project file (pooled=%s)', async pooled => {
+    let pool: QueryPool | undefined;
+    if (pooled) {
+      pool = new QueryPool({ root: otherDir, size: 1, createWorker: () => new Worker(
+        path.resolve(__dirname, '../dist/mcp/query-worker.js'), { workerData: { root: otherDir } },
+      ) });
+      handler.setQueryPool(pool);
+      await vi.waitFor(() => expect(pool!.ready).toBe(true), { timeout: 15000 });
+    }
+    try {
+      await handler.execute('codegraph_explore', { query: 'orchestrate handler3', projectPath: fixtureDir });
+      shiftBigFile();
+      const text = getText(await handler.execute('codegraph_explore', {
+        query: 'orchestrate handler3', projectPath: fixtureDir,
+      }));
+      expect(text).toContain('export function orchestrate');
+      expect(text).toContain('handler3(input)');
+      expect(text).not.toContain('changed on disk');
+      expect(text).not.toContain('source omitted');
+      const node = cgFixture.getNodesByName('orchestrate')[0]!;
+      expect(text).toContain(`${node.startLine}\texport function orchestrate`);
+    } finally {
+      await pool?.destroy();
+    }
+  });
+
+  it('refreshes an explicit file without syncing an unrelated changed file', async () => {
+    const small = path.join(fixtureDir, 'src/small.ts');
+    fs.writeFileSync(small, '/** unrelated edit */\n' + fs.readFileSync(small, 'utf8'));
     shiftBigFile();
-    const result = await handler.execute('codegraph_explore', {
-      query: 'orchestrate handler3',
-      projectPath: fixtureDir,
-    });
-    const text = getText(result);
-    expect(result.isError).toBeFalsy();
-    expect(text).toContain('changed on disk after the last index sync');
-    // No sliced body from the drifted file — its step lines must not appear.
-    expect(text).not.toMatch(/-step\d-h\d/);
-    // Line-reference caveat for the drifted file.
-    expect(text).toContain('may be shifted');
+    const text = getText(await handler.execute('codegraph_explore', {
+      query: 'src/big.ts orchestrate', projectPath: fixtureDir,
+    }));
+    expect(text).toContain('export function orchestrate');
+    expect(text).not.toContain('changed on disk');
+    expect(cgFixture.getNodesByName('smallTarget')[0]!.startLine).toBe(1);
+  });
+
+  it('keeps stale slices omitted when the handle is read-only', async () => {
+    shiftBigFile();
+    const reader = CodeGraph.openSync(fixtureDir, { readOnly: true });
+    try {
+      const text = getText(await new ToolHandler(reader).execute('codegraph_explore', { query: 'orchestrate handler3' }));
+      expect(text).toContain('changed on disk');
+      expect(text).toContain('source omitted');
+      expect(text).not.toMatch(/-step\d-h\d/);
+    } finally { reader.close(); }
+  });
+
+  it('keeps stale slices omitted when scoped sync fails', async () => {
+    shiftBigFile();
+    const sync = vi.spyOn(cgFixture, 'sync').mockRejectedValueOnce(new Error('writer busy'));
+    try {
+      const text = getText(await new ToolHandler(cgFixture).execute('codegraph_explore', { query: 'orchestrate handler3' }));
+      expect(sync).toHaveBeenCalledWith({ paths: ['src/big.ts'] });
+      expect(text).toContain('source omitted');
+      expect(text).not.toMatch(/-step\d-h\d/);
+    } finally { sync.mockRestore(); }
   });
 
   it('re-syncing the project restores normal output with no drift markers', async () => {

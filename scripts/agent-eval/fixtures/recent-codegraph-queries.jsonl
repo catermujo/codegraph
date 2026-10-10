@@ -1,0 +1,3 @@
+{"id":"formatter-discovery","args":{"query":"tool fix style formatter declarations imports memory","maxFiles":8}}
+{"id":"formatter-explicit-files","args":{"query":"odd/fix.py odd/odinfmt.py odd/cli.py","maxFiles":5}}
+{"id":"formatter-exact-file","args":{"query":"odd/odinfmt.py","maxFiles":2}}
