@@ -63,11 +63,17 @@ cg_no_cli_setup() {
   ARM_PATH="$built"
 
   if PATH="$ARM_PATH" command -v codegraph >/dev/null 2>&1; then
-    echo "WARNING: 'codegraph' is still on the arm PATH — runs will be contaminated"
+    echo "'codegraph' is still on the arm PATH — refusing to run"
+    return 1
   fi
-  for e in claude node; do
+  for e in "${CG_EVAL_AGENT:-claude}" node; do
     PATH="$ARM_PATH" command -v "$e" >/dev/null || { echo "sanitized PATH lost '$e' — refusing to run"; return 1; }
   done
+
+  # DUMBAI: Codex rejects CLI attempts from its event log instead of using a Claude hook.
+  if [ "${CG_EVAL_AGENT:-claude}" = codex ]; then
+    return 0
+  fi
 
   command -v jq >/dev/null || { echo "jq is required for the CLI-block hook — install it or the arms will be contaminated"; return 1; }
   cat > "$out/no-cli-hook.sh" <<HOOK
