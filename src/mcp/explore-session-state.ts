@@ -13,9 +13,11 @@
  * Four constraints shape the design, all of them from how the daemon actually
  * runs:
  *
- *   1. **Per session, never persisted.** One instance is owned by an
+ *   1. **Per retained context.** One instance is owned by an
  *      {@link ../mcp/session.MCPSession} and dies with the socket. A new agent
- *      session starts clean — dedup across sessions would suppress source the
+ *      session starts clean. CLI hosts can save bounded snapshots with explicit
+ *      conversation and epoch identities — project identity alone cannot prove
+ *      held source. Dedup across contexts would suppress source the
  *      new agent has never seen.
  *   2. **Per project inside the session.** A session can query several projects
  *      by `projectPath`, so state is keyed by the RESOLVED project root
@@ -120,6 +122,7 @@ export interface ExploreProjectState {
  * structured-cloned to a worker on every call.
  */
 export interface ExploreSessionView {
+  contextIdentity?: string;
   projects: ExploreProjectState[];
 }
 
@@ -214,6 +217,21 @@ interface MutableProjectState {
 export class ExploreSessionState {
   /** Insertion-ordered; a touched project is re-inserted, so the head is the LRU. */
   private readonly projects = new Map<string, MutableProjectState>();
+  private contextIdentity: string | undefined;
+
+  selectContext(conversationId?: string, contextEpoch?: string): void {
+    const identity = conversationId === undefined ? undefined : JSON.stringify([conversationId, contextEpoch]);
+    if (identity !== this.contextIdentity) this.clear();
+    this.contextIdentity = identity;
+  }
+
+  restore(view: ExploreSessionView): void {
+    this.clear();
+    this.contextIdentity = view.contextIdentity;
+    for (const project of view.projects) {
+      for (const call of project.calls) this.record(call);
+    }
+  }
 
   /**
    * File an emission. Returns the record as stored (with its session call
@@ -266,6 +284,7 @@ export class ExploreSessionState {
    */
   view(): ExploreSessionView {
     return {
+      contextIdentity: this.contextIdentity,
       projects: [...this.projects.values()].map((state) => ({
         projectRoot: state.projectRoot,
         callCount: state.callCount,
@@ -277,9 +296,10 @@ export class ExploreSessionState {
     };
   }
 
-  /** Drop everything. Used by tests; a real session just goes away instead. */
+  /** Drop held source when the host changes its context identity or epoch. */
   clear(): void {
     this.projects.clear();
+    this.contextIdentity = undefined;
   }
 
   /**
@@ -348,7 +368,11 @@ export function readExploreSessionView(args: Record<string, unknown>): ExploreSe
   if (!raw || typeof raw !== 'object') return null;
   const projects = (raw as ExploreSessionView).projects;
   if (!Array.isArray(projects)) return null;
-  return { projects: projects.filter((p) => p && typeof p.projectRoot === 'string') };
+  const contextIdentity = (raw as ExploreSessionView).contextIdentity;
+  return {
+    contextIdentity: typeof contextIdentity === 'string' ? contextIdentity : undefined,
+    projects: projects.filter((p) => p && typeof p.projectRoot === 'string'),
+  };
 }
 
 /**

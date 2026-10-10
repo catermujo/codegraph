@@ -94,14 +94,21 @@ describe('anchor-gate baseline defects', () => {
 
     const result = await new ToolHandler(graph).execute('codegraph_explore', { query: 'crowdedExplore' });
     const output = result.content?.[0]?.text ?? '';
-    expect(output).not.toMatch(/crowded-\d{2}\.ts/);
+    expect(output).toContain('Scope choices');
+    expect(output.match(/crowded-\d{2}\.ts/g)).toHaveLength(6);
+    expect(output).not.toContain('**Source Code**');
+    const scoped = await new ToolHandler(graph).execute('codegraph_explore', {
+      query: 'crowdedExplore', scope: 'crowded-00.ts', maxFiles: 1,
+    });
+    expect(scoped.content[0]?.text).toContain('export function crowdedExplore');
+    expect(scoped.content[0]?.text).not.toContain('crowded-01.ts');
     expect(output.toLowerCase()).toContain('ambiguous');
     expect(output.toLowerCase()).toContain('at least 60 exact definitions');
     expect(output.toLowerCase()).toContain('no single definition was selected');
     expect(output.toLowerCase()).toContain('file or path scope');
   });
 
-  it('reports a truncated exact family without rendering source or pointers', async () => {
+  it('reports compact scope choices for a truncated exact family without rendering source', async () => {
     for (let i = 0; i < 70; i++) {
       fs.writeFileSync(path.join(root, `truncated-${String(i).padStart(2, '0')}.ts`), 'export function truncatedExplore() { return 0; }\n');
     }
@@ -109,7 +116,9 @@ describe('anchor-gate baseline defects', () => {
 
     const result = await new ToolHandler(graph).execute('codegraph_explore', { query: 'truncatedExplore' });
     const output = result.content?.[0]?.text ?? '';
-    expect(output).not.toMatch(/truncated-\d{2}\.ts/);
+    expect(output).toContain('Scope choices');
+    expect(output.match(/truncated-\d{2}\.ts/g)).toHaveLength(6);
+    expect(output).not.toContain('**Source Code**');
     expect(output.toLowerCase()).toContain('ambiguous');
     expect(output.toLowerCase()).toContain('at least 64+ exact definitions');
     expect(output.toLowerCase()).toContain('candidate list truncated');
@@ -142,7 +151,8 @@ describe('anchor-gate baseline defects', () => {
     });
     const output = result.content?.[0]?.text ?? '';
     if (maxFiles < 4) {
-      expect(output).not.toMatch(/small-many-(?:0|1|2|3)\.ts/);
+      expect(output).toContain('Scope choices');
+      expect(output).not.toContain('**Source Code**');
     } else {
       for (let i = 0; i < 4; i++) expect(output).toContain(`small-many-${i}.ts`);
     }

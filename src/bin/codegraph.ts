@@ -1614,9 +1614,12 @@ program
   .description('Explore an area: relevant symbols\' source + call paths in one shot (same output as the codegraph_explore MCP tool)')
   .option('-p, --path <path>', 'Project path')
   .option('--max-files <number>', 'Maximum number of files to include source from')
+  .option('--scope <path>', 'Search only an exact file or directory inside the index')
+  .option('--conversation <id>', 'Conversation identity for source reuse (requires --context-epoch)')
+  .option('--context-epoch <id>', 'Context generation; change after compaction or lost source (requires --conversation)')
   .option('--target <path>', 'Restrict results to a build.toml target (direct files only)')
   .option('--include-deps', 'Include files from transitive build.toml dependencies (direct target files rank first)')
-  .action(async (queryParts: string[], options: { path?: string; maxFiles?: string; target?: string; includeDeps?: boolean }) => {
+  .action(async (queryParts: string[], options: { path?: string; maxFiles?: string; target?: string; includeDeps?: boolean; scope?: string; conversation?: string; contextEpoch?: string }) => {
     const projectPath = resolveProjectPath(options.path);
 
     try {
@@ -1629,14 +1632,31 @@ program
       const { ToolHandler } = await import('../mcp/tools');
       const handler = new ToolHandler(cg);
 
-      const args: Record<string, unknown> = { query: queryParts.join(' ') };
+      const args: Record<string, unknown> = { query: queryParts.join(' '), projectPath: path.resolve(options.path || process.cwd()) };
+      if (options.scope !== undefined) args.scope = options.scope;
+      if (options.conversation !== undefined) args.conversationId = options.conversation;
+      if (options.contextEpoch !== undefined) args.contextEpoch = options.contextEpoch;
+      if ((options.conversation !== undefined || options.contextEpoch !== undefined)
+        && ![options.conversation, options.contextEpoch].every(value => typeof value === 'string' && value.trim().length > 0 && value.length <= 256)) {
+        cg.destroy();
+        throw new Error('Source reuse requires both --conversation and --context-epoch (1–256 characters each).');
+      }
+      const context = options.conversation !== undefined && options.contextEpoch !== undefined
+        ? (await import('./explore-context')).loadExploreContext(projectPath, options.conversation, options.contextEpoch) : undefined;
       if (options.maxFiles) args.maxFiles = parseInt(options.maxFiles, 10);
       if (options.target !== undefined) args.target = options.target;
       if (options.includeDeps !== undefined) args.includeDeps = options.includeDeps;
-      const result = await handler.execute('codegraph_explore', args);
+      const result = await handler.execute('codegraph_explore', args, context?.state);
 
-      console.log(result.content[0]?.text ?? '');
+      await new Promise<void>((resolve, reject) => {
+        process.stdout.write((result.content[0]?.text ?? '') + '\n', err => err ? reject(err) : resolve());
+      });
       cg.destroy();
+      if (!result.isError && context) {
+        try { context.save(); } catch (err) {
+          process.stderr.write(`Context reuse was not saved: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
+      }
       if (result.isError) process.exit(1);
     } catch (err) {
       error(`Explore failed: ${err instanceof Error ? err.message : String(err)}`);

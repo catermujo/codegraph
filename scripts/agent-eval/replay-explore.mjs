@@ -44,12 +44,15 @@ function shellQueries(command) {
     for (let i = 0; i < tokens.length; i++) {
       const flag = tokens[i];
       if (flag === '--include-deps') { args.includeDeps = true; continue; }
-      if (!['-p', '--path', '--target', '--max-files'].includes(flag)) { supported = false; break; }
+      if (!['-p', '--path', '--target', '--max-files', '--scope', '--conversation', '--context-epoch'].includes(flag)) { supported = false; break; }
       const raw = tokens[++i];
       if (!raw || /[$`\\]/.test(raw)) { supported = false; break; }
       const value = raw.replace(/^['"]|['"]$/g, '');
       if (flag === '--max-files') args.maxFiles = Number(value);
       else if (flag === '--target') args.target = value;
+      else if (flag === '--scope') args.scope = value;
+      else if (flag === '--conversation') args.conversationId = value;
+      else if (flag === '--context-epoch') args.contextEpoch = value;
       else args.projectPath = value;
     }
     if (supported) queries.push(args);

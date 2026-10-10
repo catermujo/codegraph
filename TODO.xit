@@ -19,9 +19,9 @@ Retrieval quality
     Preserve exact-anchor precedence and avoid adding a second ranking system without a measured usability gain.
 
 Coverage and API cleanup
-[ ] !! Prove when a session back-reference satisfies anchor coverage by checking held ranges and fingerprints #coverage #sessions
-    Until this proof exists, keep pointer and back-reference coverage conservatively incomplete.
-[ ] ! Make the anchored coverage-note reservation adaptive so constrained responses retain more useful source while the note still survives the hard ceiling #coverage #rendering
+[x] 2026-10-10 Prove when a session back-reference satisfies anchor coverage by checking held ranges and fingerprints #coverage #sessions
+    Held source now requires matching fingerprints and complete line ranges. Pointers alone remain incomplete.
+[x] 2026-10-10 Make the anchored coverage-note reservation adaptive so constrained responses retain more useful source while the note still survives the hard ceiling #coverage #rendering
 [ ] ! Move internal scope, symbol-resolution, and coverage fields behind internal TypeScript types where public compatibility permits #api #types
 [ ] ! Expose structured anchor coverage to evaluation and diagnostic tooling without leaking the internal emission side channel into public MCP responses #coverage #evaluation
 [?] ! Decide whether directory coverage should account for ignored or non-indexed descendants #coverage #product-decision

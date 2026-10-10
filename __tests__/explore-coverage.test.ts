@@ -22,7 +22,7 @@ const fact = (
   bytes: 20,
   status,
   fullRanges: [{ start: 1, end: lineCount - 1 }],
-  lineCount,
+  lineCount: lineCount - 1,
 });
 
 const fileAnchor = (raw: string, filePath: string, ordinal = 0): QueryPathAnchor => ({
@@ -291,5 +291,50 @@ describe('buildExploreCoverage', () => {
     })!;
     expect(formatExploreCoverage(coverage).length).toBeLessThanOrEqual(1_200);
     expect(formatExploreCoverage(coverage)).toContain('truncated');
+  });
+});
+
+describe('held source proof', () => {
+  const ranges = [{ start: 1, end: 3 }];
+  const state = new ExploreSessionState();
+  state.record({ projectRoot: '/repo', query: 'Wanted', sourceBytes: 20, responseBytes: 100,
+    files: [{ path: 'src/a.ts', ranges, bytes: 20, fingerprint: 'same' }] });
+  const backref = { ...fact('src/a.ts', ranges, 'back-reference'), fingerprint: 'same',
+    deliveredRanges: [], heldRanges: ranges };
+  const text = '**`src/a.ts`**\n\n> **Already sent earlier in this conversation:** `src/a.ts` L1-3\n';
+  it('accepts held full-file coverage only with matching fingerprints and ranges', () => {
+    const coverage = buildExploreCoverage({ pathAnchors: [fileAnchor('src/a.ts', 'src/a.ts')],
+      priorCalls: state.forProject('/repo'), renderFacts: [backref], finalText: text });
+    expect(coverage?.complete).toBe(true);
+    expect(coverage?.files[0]).toMatchObject({ ranges: [], heldRanges: ranges });
+  });
+  it.each(['changed', undefined])('rejects a changed or absent fingerprint (%s)', fingerprint => {
+    const coverage = buildExploreCoverage({ pathAnchors: [fileAnchor('src/a.ts', 'src/a.ts')],
+      priorCalls: state.forProject('/repo'), renderFacts: [{ ...backref, fingerprint }], finalText: text });
+    expect(coverage?.complete).toBe(false);
+  });
+  it('requires the entire candidate, not just a held signature', () => {
+    const partial = new ExploreSessionState();
+    partial.record({ projectRoot: '/repo', query: 'Wanted', sourceBytes: 10, responseBytes: 50,
+      files: [{ path: 'src/a.ts', ranges: [{ start: 1, end: 1 }], bytes: 10, fingerprint: 'same' }] });
+    const coverage = buildExploreCoverage({ symbolResolutions: [symbol('Wanted', 'one', [candidate('n1', 'src/a.ts', 1, 3)])],
+      priorCalls: partial.forProject('/repo'), renderFacts: [backref], finalText: text });
+    expect(coverage?.allCandidatesCovered).toBe(false);
+    expect(coverage?.complete).toBe(false);
+  });
+  it('requires the final source line even when the file has no trailing newline', () => {
+    const partial = new ExploreSessionState();
+    partial.record({ projectRoot: '/repo', query: 'Wanted', sourceBytes: 10, responseBytes: 50,
+      files: [{ path: 'src/a.ts', ranges: [{ start: 1, end: 2 }], bytes: 10, fingerprint: 'same' }] });
+    const coverage = buildExploreCoverage({ pathAnchors: [fileAnchor('src/a.ts', 'src/a.ts')],
+      priorCalls: partial.forProject('/repo'), renderFacts: [backref], finalText: text });
+    expect(coverage?.complete).toBe(false);
+  });
+  it('does not count delivered ranges when their final fence was clipped', () => {
+    const coverage = buildExploreCoverage({ pathAnchors: [fileAnchor('src/a.ts', 'src/a.ts')],
+      priorCalls: state.forProject('/repo'), renderFacts: [{ ...backref, heldRanges: [], deliveredRanges: ranges }],
+      finalText: text + '\n```ts\n1\tpartial' });
+    expect(coverage?.complete).toBe(false);
+    expect(coverage?.files[0]?.ranges).toEqual([]);
   });
 });

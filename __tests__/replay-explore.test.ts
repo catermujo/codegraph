@@ -29,6 +29,8 @@ describe('recorded Explore replay', () => {
       { transport: 'cli', args: { query: 'src/main.ts', target: 'app', includeDeps: true, maxFiles: 3 } },
     ]);
     expect(queryCalls('exec_command', { cmd: 'codegraph explore "$(cat private)"' })).toEqual([]);
+    expect(queryCalls('exec_command', { cmd: 'codegraph explore "Wanted" --scope src --conversation test --context-epoch 2' }))
+      .toEqual([{ transport: 'cli', args: { query: 'Wanted', scope: 'src', conversationId: 'test', contextEpoch: '2' } }]);
     const records = extractRecords([
       { type: 'response_item', payload: { type: 'function_call', call_id: 'one', name: 'mcp__codegraph__codegraph_explore', arguments: '{"query":"ExactThing"}' } },
       { type: 'response_item', payload: { type: 'custom_tool_call', call_id: 'two', name: 'functions.exec', input: "await tools.mcp__codegraph__codegraph_explore({query: 'cat'});" } },

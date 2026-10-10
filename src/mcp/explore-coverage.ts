@@ -1,5 +1,7 @@
 import type { QueryPathAnchor } from '../search/query-paths';
 import type { SymbolResolution } from '../types';
+import type { ExploreProjectState } from './explore-session-state';
+import { servedRangesForFile, intersectRange } from './explore-dedup';
 
 export type ExploreCoverageResolutionStatus =
   | 'resolved' | 'ambiguous' | 'unresolved' | 'not-indexed' | 'missing' | 'outside-root';
@@ -32,6 +34,7 @@ export interface ExploreCoverageFile {
   status: ExploreCoverageRenderStatus;
   ranges: ExploreLineRange[];
   fingerprint?: string;
+  heldRanges?: ExploreLineRange[];
 }
 
 export interface ExploreLineRange {
@@ -59,6 +62,8 @@ export interface ExploreCoverageRenderFact {
   bytes: number;
   fingerprint?: string;
   status: ExploreCoverageRenderStatus;
+  deliveredRanges?: ExploreLineRange[];
+  heldRanges?: ExploreLineRange[];
   fullRanges: ExploreLineRange[];
   lineCount: number;
 }
@@ -72,12 +77,15 @@ export interface ExploreCoverageInput {
   allowedFilePaths?: readonly string[];
   renderFacts: readonly ExploreCoverageRenderFact[];
   finalText: string;
+  priorCalls?: ExploreProjectState | null;
+  includeUnanchored?: boolean;
 }
 
 export const EXPLORE_COVERAGE_NOTE_MAX = 1_200;
 
 interface FinalSection {
   hasClosedFence: boolean;
+  hasBackReference: boolean;
 }
 
 const mergeRanges = (ranges: readonly ExploreLineRange[]): ExploreLineRange[] => {
@@ -98,7 +106,7 @@ const coversRange = (ranges: readonly ExploreLineRange[], wanted: ExploreLineRan
   mergeRanges(ranges).some((range) => range.start <= wanted.start && range.end >= wanted.end);
 
 const coversFile = (fact: ExploreCoverageRenderFact): boolean => {
-  const end = Math.max(1, fact.lineCount - 1);
+  const end = Math.max(1, fact.lineCount);
   return coversRange(fact.fullRanges, { start: 1, end })
     && coversRange(fact.ranges, { start: 1, end });
 };
@@ -107,10 +115,11 @@ function finalSections(text: string): Map<string, FinalSection> {
   const result = new Map<string, FinalSection>();
   let pendingPath: string | undefined;
   let activeFence: { char: '`' | '~'; length: number; path?: string } | undefined;
-  const remember = (path: string, hasClosedFence: boolean): void => {
+  const remember = (path: string, hasClosedFence: boolean, hasBackReference = false): void => {
     const previous = result.get(path);
     result.set(path, {
       hasClosedFence: (previous?.hasClosedFence ?? false) || hasClosedFence,
+      hasBackReference: (previous?.hasBackReference ?? false) || hasBackReference,
     });
   };
   for (const line of text.split('\n')) {
@@ -134,6 +143,8 @@ function finalSections(text: string): Map<string, FinalSection> {
     if (header !== null) {
       pendingPath = header[1];
       remember(header[1]!, false);
+    } else if (pendingPath !== undefined && line.startsWith('> **Already sent earlier in this conversation:**')) {
+      remember(pendingPath, false, true);
     } else if (pendingPath !== undefined && line.trim() !== '') {
       pendingPath = undefined;
     }
@@ -171,7 +182,7 @@ function pathStatus(
 export function buildExploreCoverage(input: ExploreCoverageInput): ExploreCoverage | undefined {
   const pathAnchors = input.pathAnchors ?? [];
   const symbolResolutions = input.symbolResolutions ?? [];
-  if (pathAnchors.length === 0 && symbolResolutions.length === 0 && !input.pathAnchorsTruncated) return undefined;
+  if (!input.includeUnanchored && pathAnchors.length === 0 && symbolResolutions.length === 0 && !input.pathAnchorsTruncated) return undefined;
 
   const allowed = input.allowedFilePaths === undefined ? undefined : new Set(input.allowedFilePaths);
   const indexedFiles = input.indexedFiles ?? [];
@@ -229,8 +240,15 @@ export function buildExploreCoverage(input: ExploreCoverageInput): ExploreCovera
     const section = sections.get(filePath);
     if (!fact) return { path: filePath, status: 'omitted' as const, ranges: [] };
     if (!section) return { path: filePath, status: 'dropped' as const, ranges: [], fingerprint: fact.fingerprint };
-    if (fact.status === 'pointer' || fact.status === 'back-reference') {
+    if (fact.status === 'pointer') {
       return { path: filePath, status: fact.status, ranges: [], fingerprint: fact.fingerprint };
+    }
+    if (fact.status === 'back-reference') {
+      const proved = section.hasBackReference && fact.fingerprint
+        ? servedRangesForFile(input.priorCalls ?? null, filePath, fact.fingerprint) : [];
+      const heldRanges = mergeRanges((fact.heldRanges ?? []).flatMap(range => intersectRange(range, proved)));
+      const delivered = section.hasClosedFence ? mergeRanges(fact.deliveredRanges ?? []) : [];
+      return { path: filePath, status: fact.status, ranges: delivered, heldRanges, fingerprint: fact.fingerprint };
     }
     if (!section.hasClosedFence) {
       return { path: filePath, status: 'dropped' as const, ranges: [], fingerprint: fact.fingerprint };
@@ -259,7 +277,7 @@ export function buildExploreCoverage(input: ExploreCoverageInput): ExploreCovera
       }
       for (const candidate of anchor.candidates) {
         const file = fileByPath.get(candidate.filePath);
-        const covered = file !== undefined && coversRange(file.ranges, {
+        const covered = file !== undefined && file.status !== 'stale' && coversRange([...file.ranges, ...(file.heldRanges ?? [])], {
           start: candidate.startLine,
           end: candidate.endLine,
         });
@@ -270,8 +288,9 @@ export function buildExploreCoverage(input: ExploreCoverageInput): ExploreCovera
       for (const filePath of anchor.expectedFiles) {
         const fact = factsByFile.get(filePath);
         const final = fileByPath.get(filePath);
-        const complete = fact !== undefined && final?.status === 'full-current' && coversFile(fact)
-          && final.ranges.length > 0;
+        const available = final ? [...final.ranges, ...(final.heldRanges ?? [])] : [];
+        const complete = fact !== undefined && (final?.status === 'full-current' || final?.status === 'back-reference')
+          && coversRange(available, { start: 1, end: Math.max(1, fact.lineCount) });
         allCandidatesCovered = allCandidatesCovered && complete;
         if (!complete) everyAnchorComplete = false;
       }
@@ -283,7 +302,7 @@ export function buildExploreCoverage(input: ExploreCoverageInput): ExploreCovera
   }
 
   const relevantFiles = files.filter((file) => expectedFiles.has(file.path));
-  const hasBadRelevantRender = relevantFiles.some((file) => file.status !== 'full-current');
+  const hasBadRelevantRender = relevantFiles.some(file => file.status !== 'full-current' && file.status !== 'back-reference');
   return {
     complete: !input.pathAnchorsTruncated && everyAnchorComplete && allCandidatesCovered && !hasBadRelevantRender,
     inventoryTruncated: input.pathAnchorsTruncated === true,
@@ -309,7 +328,7 @@ export function formatExploreCoverage(
   const candidates = candidateAnchors.flatMap((anchor) => anchor.candidates);
   const coveredCandidates = candidates.filter((candidate) => {
     const file = coverage.files.find((entry) => entry.path === candidate.filePath);
-    return file !== undefined && coversRange(file.ranges, {
+    return file !== undefined && file.status !== 'stale' && coversRange([...file.ranges, ...(file.heldRanges ?? [])], {
       start: candidate.startLine,
       end: candidate.endLine,
     });
@@ -322,7 +341,10 @@ export function formatExploreCoverage(
   for (const file of expectedFiles) {
     renderCounts.set(file.status, (renderCounts.get(file.status) ?? 0) + 1);
   }
+  const delivered = expectedFiles.filter(file => file.ranges.length > 0 && file.status !== 'stale').length;
+  const held = expectedFiles.filter(file => (file.heldRanges?.length ?? 0) > 0).length;
   const parts = [`Anchor coverage: ${coverage.complete ? 'complete' : 'incomplete'}.`];
+  if (held > 0) parts.push(`Source: ${delivered} file(s) delivered now, ${held} file(s) held with verified ranges and fingerprints.`);
   if (coverage.anchorCount > 0) {
     parts.push(`${coverage.anchorCount} explicit anchor${coverage.anchorCount === 1 ? '' : 's'}.`);
   }

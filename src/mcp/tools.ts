@@ -70,6 +70,7 @@ import { getUpdateNotice } from '../upgrade/update-check';
 import { measurePendingChanges } from './index-freshness';
 import { validateAnswerFiles, type AnswerFile } from './answer-freshness';
 import { ExploreDiagnostics } from './explore-diagnostics';
+import { resolveExploreScope } from './explore-scope';
 import {
   IndexVersionWarningState,
   formatIndexBuildVersion,
@@ -1896,6 +1897,9 @@ export const tools: ToolDefinition[] = [
           type: 'string',
           description: 'Restrict results to a relative build.toml target path; only files directly associated with that target are included unless includeDeps is enabled.',
         },
+        scope: { type: 'string', description: 'Search only this exact file or directory relative to the index root. projectPath selects the index; scope limits its results.' },
+        conversationId: { type: 'string', description: 'Host context identity for source reuse. Requires contextEpoch. Omit when the host cannot track retained context.' },
+        contextEpoch: { type: 'string', description: 'Host context generation. Change after compaction or any loss of earlier source, together with conversationId.' },
         includeDeps: {
           type: 'boolean',
           description: 'When target is set, include files from its transitive build.toml dependencies; direct target files rank first.',
@@ -2981,12 +2985,21 @@ export class ToolHandler {
     if (rawTarget !== undefined && !target) return;
     const targetFiles = target === null ? undefined
       : new Set(cg.getTargetFilesForScope(target.path, args.includeDeps === true));
+    const rawScope = this.validateOptionalPath(args.scope, 'scope');
+    if (typeof rawScope !== 'string' && rawScope !== undefined) return;
+    const explicitScope = rawScope === undefined ? undefined
+      : resolveExploreScope(cg.getProjectRoot(), cg.getFiles().map(file => file.path), rawScope);
+    if (explicitScope && 'message' in explicitScope) return;
+    const scopeFiles = explicitScope && 'files' in explicitScope ? new Set(explicitScope.files) : undefined;
     const MAX_FILES = 8;
     const MAX_BYTES = 8 * 1024 * 1024;
     const candidates = new Set<string>();
+    if (explicitScope && 'files' in explicitScope && explicitScope.exactFile
+      && (targetFiles === undefined || targetFiles.has(explicitScope.path))) candidates.add(explicitScope.path);
     let scope: ReturnType<typeof extractQueryPaths>['hardScope'];
     if (queryMightContainPaths(query)) {
-      const files = targetFiles ? [...targetFiles] : cg.getFiles().map(file => file.path);
+      const files = (targetFiles ? [...targetFiles] : cg.getFiles().map(file => file.path))
+        .filter(file => scopeFiles === undefined || scopeFiles.has(file));
       const extraction = extractQueryPaths(query, files, {
         rootPath: cg.getProjectRoot(), maxPins: MAX_FILES, consumeDirectories: true,
         symbolFiles: symbol => filesDefiningSymbol(cg, symbol),
@@ -2999,6 +3012,7 @@ export class ToolHandler {
       if (!/^[A-Za-z_$][\w$]*(?:(?:::|\.)[\w$]+)*$/.test(token)) continue;
       const files = [...new Set(filesDefiningSymbol(cg, token))].filter(file =>
         (targetFiles === undefined || targetFiles.has(file))
+        && (scopeFiles === undefined || scopeFiles.has(file))
         && (scope === undefined || scope.exactFiles.includes(file)
           || scope.directoryPrefixes.some(prefix => file === prefix || file.startsWith(`${prefix}/`))));
       // DUMBAI: Broad or ambiguous families must not turn a read into a repository-wide sync.
@@ -3282,6 +3296,17 @@ export class ToolHandler {
       // object down, on the ToolResult up — because either leg may cross a
       // structured-clone boundary into a worker, where a closure or a handler
       // field could not follow.
+      if (toolName === 'codegraph_explore') {
+        const identity = [args.conversationId, args.contextEpoch];
+        if (identity.some(value => value !== undefined)) {
+          if (!identity.every(value => typeof value === 'string' && value.trim().length > 0 && value.length <= 256)) {
+            return this.textResult('Source reuse requires both conversationId and contextEpoch (1–256 characters each).');
+          }
+          sessionState?.selectContext(args.conversationId as string, args.contextEpoch as string);
+        } else {
+          sessionState?.selectContext();
+        }
+      }
       const dispatchArgs = this.withSessionView(toolName, args, sessionState);
       // The default may have appeared after the workers started. Pass the
       // main thread's current root explicitly; with no root or projectPath,
@@ -3325,7 +3350,8 @@ export class ToolHandler {
       // Record + STRIP before anything else touches the result: the emission is
       // internal bookkeeping and must never reach the client, whether or not a
       // caller passed session state.
-      const result = this.takeExploreEmission(raw, sessionState);
+      const sameContext = sessionState?.view().contextIdentity === readExploreSessionView(dispatchArgs)?.contextIdentity;
+      const result = this.takeExploreEmission(raw, sameContext ? sessionState : undefined);
       const withWorktree = this.withWorktreeNotice(result, args.projectPath as string | undefined);
       const withStaleness = this.withStalenessNotice(
         withWorktree,
@@ -4623,16 +4649,22 @@ export class ToolHandler {
     let allowedFilePaths: string[] | undefined;
     let indexedScopeFiles: string[] = [];
     let pathExtraction: ReturnType<typeof extractQueryPaths> | undefined;
+    const rawScope = this.validateOptionalPath(args.scope, 'scope');
+    if (typeof rawScope !== 'string' && rawScope !== undefined) return rawScope;
+    const explicitScope = rawScope === undefined ? undefined
+      : resolveExploreScope(projectRoot, cg.getFiles().map(file => file.path), rawScope);
+    if (explicitScope && 'message' in explicitScope) return this.textResult(explicitScope.message);
     let matchQuery = query;
     if (queryMightContainPaths(rawQuery)) {
       try {
-        indexedScopeFiles = targetFiles ? [...targetFiles] : cg.getFiles().map((f) => f.path);
+        indexedScopeFiles = (targetFiles ? [...targetFiles] : cg.getFiles().map((f) => f.path))
+          .filter(file => !explicitScope || !('files' in explicitScope) || explicitScope.files.includes(file));
         const indexedRepoFiles = targetFiles === undefined ? indexedScopeFiles : cg.getFiles().map((f) => f.path);
         const extraction = extractQueryPaths(
           rawQuery,
           indexedScopeFiles,
           {
-            maxPins: maxFiles, rootPath: projectRoot, consumeDirectories: true,
+            maxPins: maxFiles, maxMatchesPerSpan: maxFiles, rootPath: projectRoot, consumeDirectories: true,
             existsOnDisk: (rel) => pathIsProjectFile(projectRoot, rel),
             symbolFiles: (symbol) => filesDefiningSymbol(cg, symbol).filter((file) => targetFiles === undefined || targetFiles.has(file)),
           },
@@ -4702,6 +4734,16 @@ export class ToolHandler {
         }
       } catch { /* path pinning must never fail an explore call */ }
     }
+    if (explicitScope && 'files' in explicitScope) {
+      const scopeFiles = new Set(explicitScope.files);
+      allowedFilePaths = (allowedFilePaths ?? cg.getFiles().map(file => file.path))
+        .filter(file => scopeFiles.has(file) && (targetFiles === undefined || targetFiles.has(file)));
+      if (explicitScope.exactFile && allowedFilePaths.includes(explicitScope.path)) {
+        pinnedFiles = [...new Set([explicitScope.path, ...pinnedFiles])];
+      }
+      pinnedFiles = pinnedFiles.filter(file => allowedFilePaths!.includes(file));
+      lineAnchors = lineAnchors.filter(anchor => allowedFilePaths!.includes(anchor.file));
+    }
     // A COBOL copybook the query names (`CVACT01Y`) names its FILE as surely as
     // `app/cpy/CVACT01Y.cpy` would (#2342), so it is pinned the same way: the
     // copybook's own source is admitted, ranked first and funded first. Looked
@@ -4712,6 +4754,9 @@ export class ToolHandler {
     try {
       namedCopybooks = cg.findNamedCopybooks(matchQuery);
     } catch { /* copybook pinning must never fail an explore call */ }
+    if (allowedFilePaths !== undefined) namedCopybooks = namedCopybooks.map(copybook => ({
+      ...copybook, files: copybook.files.filter(file => allowedFilePaths!.includes(file.filePath)),
+    })).filter(copybook => copybook.files.length > 0);
     for (const copybook of namedCopybooks) {
       for (const file of copybook.files) {
         if (pinnedFiles.length >= maxFiles) break;
@@ -4752,9 +4797,11 @@ export class ToolHandler {
     // whether this call may act on it (CG-18). Dedup is off on the session's
     // first call by construction — there is nothing to point back AT — and off
     // entirely under `CODEGRAPH_EXPLORE_DEDUP=0`.
-    const priorCalls = viewForProject(readExploreSessionView(args), projectRoot);
+    const sessionView = readExploreSessionView(args);
+    const priorCalls = viewForProject(sessionView, projectRoot);
     diag?.noteSession(priorCalls);
-    const dedupEnabled = exploreDedupEnabled() && (priorCalls?.calls.length ?? 0) > 0;
+    const dedupEnabled = (sessionView?.contextIdentity !== undefined || exploreDedupEnabled())
+      && (priorCalls?.calls.length ?? 0) > 0;
 
     // Cross-call dedup accounting (CG-18). `newSourceChars` is the load-bearing
     // one: a response whose source is ENTIRELY back-references is the shape that
@@ -4797,6 +4844,8 @@ export class ToolHandler {
           ranges: [...ranges],
           bytes,
           fingerprint,
+          deliveredRanges: fact?.deliveredRanges,
+          heldRanges: fact?.heldRanges,
           status: fact?.status ?? 'candidate-covered-partial',
           fullRanges: fact?.fullRanges ?? [],
           lineCount: fact?.lineCount ?? 0,
@@ -4932,9 +4981,20 @@ export class ToolHandler {
           : `Anchor \`${resolution.raw}\` is ambiguous: at least ${count} exact definitions were found${resolution.truncated ? ' (candidate list truncated)' : ''}; no single definition was selected. Add a file or path scope to disambiguate`;
       });
     const symbolResolutionNotes = formatSymbolResolutionNotes(subgraph.symbolResolutions ?? []);
+    if (explicitScope && 'files' in explicitScope) symbolResolutionNotes.unshift(`Search scope: \`${explicitScope.path}\` (index: \`${projectRoot}\`)`);
+    for (const resolution of subgraph.symbolResolutions ?? []) {
+      if (resolution.status === 'many' && (resolution.truncated || resolution.candidates.length > maxFiles)) {
+        const choices = [...new Set(resolution.candidates.map(candidate => candidate.filePath))].slice(0, 6);
+        symbolResolutionNotes.push(`Scope choices for \`${resolution.raw}\`: ${choices.map(file => `\`${file}\``).join(', ')}`);
+      }
+    }
 
     const coveragePathAnchors = (): NonNullable<ReturnType<typeof extractQueryPaths>['pathAnchors']> => {
       const anchors = [...(pathExtraction?.pathAnchors ?? [])];
+      if (explicitScope && 'files' in explicitScope && explicitScope.exactFile) anchors.push({
+        raw: rawScope!, ordinal: -1, start: 0, end: 0, kind: 'file', normalized: explicitScope.path,
+        status: 'resolved', resolvedFiles: [explicitScope.path],
+      });
       const known = new Set(anchors.flatMap((anchor) => [anchor.raw, anchor.normalized]));
       const supplemental = [
         ...notIndexedPathSpans.map((raw) => [raw, 'not-indexed'] as const),
@@ -4965,7 +5025,8 @@ export class ToolHandler {
     const hasExplicitCoverage = coveragePathAnchors().length > 0
       || (subgraph.symbolResolutions?.length ?? 0) > 0
       || pathExtraction?.pathAnchorsTruncated === true;
-    const coverageFor = (text: string) => buildExploreCoverage({
+    const coverageFor = (text: string, includeUnanchored = false) => buildExploreCoverage({
+      includeUnanchored,
       pathAnchors: coveragePathAnchors(),
       pathAnchorStatusOverrides: new Map(
         (pathExtraction?.pathAnchors ?? []).flatMap((anchor) => {
@@ -4983,6 +5044,7 @@ export class ToolHandler {
       symbolResolutions: subgraph.symbolResolutions,
       indexedFiles: indexedScopeFiles,
       allowedFilePaths,
+      priorCalls: dedupEnabled ? priorCalls : null,
       renderFacts: [...emittedByFile.values()].map((fact) => staleRendered.includes(fact.path)
         ? { ...fact, status: 'stale' as const }
         : fact),
@@ -5011,6 +5073,11 @@ export class ToolHandler {
         outsidePathSpans.length > 0
           ? `Explicit path anchor${outsidePathSpans.length === 1 ? '' : 's'} ${outsidePathSpans.map((s) => `\`${s}\``).join(', ')} is outside the project root`
           : '',
+        ...(pathExtraction?.pathAnchors ?? []).filter(anchor => anchor.status === 'ambiguous').slice(0, 2).map(anchor => {
+          const suffix = anchor.normalized;
+          const choices = indexedScopeFiles.filter(file => file === suffix || file.endsWith(`/${suffix}`)).slice(0, 6);
+          return `Scope choices for \`${anchor.raw}\`: ${choices.map(file => `\`${file}\``).join(', ')}. Set scope to an exact file`;
+        }),
         ...symbolResolutionNotes,
       ].filter(Boolean);
       const missNote = pathNotes.length > 0 ? ` (${pathNotes.join('. ')}.)` : '';
@@ -6593,8 +6660,10 @@ export class ToolHandler {
               : opts.mode === 'whole' ? 'full-current' : 'candidate-covered-partial';
           noteEmitted(filePath, [...ranges, ...opts.covered], body.length, fingerprint, {
             status: renderStatus,
+            deliveredRanges: ranges,
+            heldRanges: opts.covered,
             fullRanges: opts.fullRanges,
-            lineCount: fileLines.length,
+            lineCount: fileLines.length - (fileLines[fileLines.length - 1] === '' ? 1 : 0),
           });
           renderedFilePaths.push(filePath);
           filesIncluded++;
@@ -6611,8 +6680,10 @@ export class ToolHandler {
         diag?.recordDedup(filePath, coveredChars(opts.covered), opts.covered);
         noteEmitted(filePath, opts.covered, 0, fingerprint, {
           status: opts.covered.length > 0 ? 'back-reference' : 'pointer',
+          deliveredRanges: [],
+          heldRanges: opts.covered,
           fullRanges: opts.fullRanges,
-          lineCount: fileLines.length,
+          lineCount: fileLines.length - (fileLines[fileLines.length - 1] === '' ? 1 : 0),
         });
         renderedFilePaths.push(filePath);
         if (!suppressedFallback && opts.fullBody.length > 0) {
@@ -6625,7 +6696,7 @@ export class ToolHandler {
             overhead: opts.overhead,
             ranges: opts.fullRanges,
             fingerprint,
-            lineCount: fileLines.length,
+            lineCount: fileLines.length - (fileLines[fileLines.length - 1] === '' ? 1 : 0),
           };
         }
       };
@@ -8258,7 +8329,7 @@ export class ToolHandler {
           bytes: restore.sourceChars,
           fingerprint: restore.fingerprint,
           status: 'full-current',
-          fullRanges: [{ start: 1, end: Math.max(1, restore.lineCount - 1) }],
+          fullRanges: [{ start: 1, end: Math.max(1, restore.lineCount) }],
           lineCount: restore.lineCount,
         });
         diag?.recordRender(restore.filePath, 'clusters', restore.sourceChars, false);
@@ -8552,12 +8623,15 @@ export class ToolHandler {
     // be re-served for nothing.
     const emittedFiles: ExploreFileEmission[] = [];
     let sourceBytes = 0;
+    const finalCoverage = coverageFor(finalText, true);
     for (const fp of survivors) {
+      const finalFile = finalCoverage?.files.find(file => file.path === fp);
+      if (finalFile && (finalFile.status === 'dropped' || finalFile.status === 'stale')) continue;
       const emitted = emittedByFile.get(fp);
       if (!emitted || emitted.ranges.length === 0) continue;
       emittedFiles.push({
         path: fp,
-        ranges: emitted.ranges,
+        ranges: finalFile ? [...finalFile.ranges, ...(finalFile.heldRanges ?? [])] : emitted.ranges,
         bytes: emitted.bytes,
         fingerprint: emitted.fingerprint,
       });

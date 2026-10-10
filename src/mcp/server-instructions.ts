@@ -60,6 +60,7 @@ calls; a grep/read exploration is dozens.
 - **Almost any question — "how does X work", architecture, a bug, "what/where is X", or surveying an area** → \`codegraph_explore\` with a natural-language question or the relevant names. ONE capped call returns the verbatim source grouped by file; most often the ONLY call you need.
 - **"How does X reach/become Y? / the flow / the path from X to Y"** → \`codegraph_explore\`, naming the symbols that span the flow (e.g. \`mutateElement renderScene\`) — it surfaces the call path among them, riding dynamic-dispatch hops, and returns their source.
 - **Reading or editing a file/symbol you can name** → put its name or file path in the \`codegraph_explore\` query — it returns that current line-numbered source (safe to \`Edit\` from) with the call path and blast radius attached, so you don't Read it separately. For an overloaded name it returns every matching definition's body in one call.
+- Pass \`projectPath\` to select the index. Pass \`scope\` to limit results to an exact file or directory within that index. Ambiguous paths return scope choices.
 - **Need more?** Call \`codegraph_explore\` again with more specific names — treat the source it returns as already Read. Suggested call counts are advisory only, NOT a quota; extra calls are never rejected or rate-limited.
 - Qualified symbol names accept dots, \`::\`, or slashes, including containers whose names contain dots (for example, \`AppWeb.Format.group\`).
 - Named-symbol call paths require exact matches; partial or mistyped names are never silently substituted as flow endpoints. If a graph query reports a missing symbol with did-you-mean suggestions, query the suggested name explicitly.
@@ -71,9 +72,11 @@ calls; a grep/read exploration is dozens.
 - **Don't grep or Read first** to find or understand indexed code — ONE \`codegraph_explore\` returns the relevant symbols' source together in a single round-trip. Reach for raw \`Read\`/\`Grep\` only to confirm a specific detail codegraph didn't cover, or for what codegraph doesn't index (configs, docs).
 - **Don't reconstruct a flow by hand** — name the endpoints in one \`codegraph_explore\` and it surfaces the path between them, dynamic-dispatch hops included.
 - **After editing, check the staleness banner.** When a tool response starts with "⚠️ Some files referenced below were edited since the last index sync…", the listed files are pending re-index — Read those specific files for accurate content. Every file NOT in that banner is fresh, so still trust codegraph. A different, rarer banner — "⚠️ CodeGraph auto-sync is DISABLED…" or "⚠️ CodeGraph auto-sync is RECOVERING…" — means the whole index may be stale; until the full catch-up completes, Read files directly to confirm anything that may have changed. If a response refuses to answer from changed files or says freshness could not be verified within its budget, retry after sync or narrow the query; that refusal is not an error in the tool.
-- **A file flagged "⚠ changed on disk after the last index sync" drifted from its index** (most common on projects queried via \`projectPath\`, which have no live watcher). Codegraph never serves a possibly-mis-sliced body from such a file — it either shows the file's full CURRENT source (trust it as a Read) or omits the source with this flag. When the source was omitted, Read that specific file; line numbers referencing it elsewhere in the response may be shifted until that project's next sync. All unflagged files remain trustworthy.
+- Explore refreshes changed files named by exact anchors before it selects source ranges. This refresh has file and byte limits. Read-only or degraded indexes keep the stale-source guard. If a response omits stale source, narrow the query or retry after sync.
 
-- **Source is re-served on every call by default**, including for fresh subagents and after context compaction. Cross-call dedup requires \`CODEGRAPH_EXPLORE_DEDUP=1\` and is only suitable for hosts that guarantee one durable context per connection. With that opt-in, **"Already sent earlier in this conversation"** points to exact, unchanged source returned by an earlier \`codegraph_explore\` in that context. Use that copy; don't re-fetch it and don't Read the file. The bytes it freed went into source you have not seen yet, elsewhere in the same response.
+- By default, each call returns source again. Hosts can pass \`conversationId\` and \`contextEpoch\` to enable reuse of source held in that context. Change the epoch after compaction or any loss of earlier source. Omit both fields if the host cannot track retained context. The coverage note separates source delivered now from held source with matching ranges and fingerprints. A pointer alone does not prove coverage. The legacy \`CODEGRAPH_EXPLORE_DEDUP=1\` flag still requires one durable context per connection.
+
+CLI hosts can use \`--scope\`, \`--conversation\`, and \`--context-epoch\` with \`codegraph explore\`. Both identity flags are required for reuse. Change the epoch after compaction. CLI records contain ranges and fingerprints in the selected index's \`.codegraph/explore-context\` directory. Calls without both identity flags return source again.
 
 ## Limitations
 
@@ -109,7 +112,7 @@ default project — but the tools are available and work **per project**:
   monorepo, or a second repo), pass its path as \`projectPath\` to
   \`codegraph_explore\` (and any other codegraph tool). Codegraph resolves the
   nearest \`.codegraph/\` at or above that path and answers from it — for as many
-  projects as you like in one session.
+  projects as you like in one session. Pass \`scope\` to limit results to a file or directory within the selected index.
 - For a project with no \`.codegraph/\`, use your built-in tools (Read/Grep/Glob)
   for that project. Indexing is the user's decision — don't run it yourself, but
   if it comes up they can run \`codegraph init\` in a project to enable codegraph
