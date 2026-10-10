@@ -36,7 +36,8 @@ test('CLI wrappers invalidate attribution while search mentions do not', () => {
     'npx @colbymchenry/codegraph explore q', '/bin/zsh -lc "codegraph explore q"']) {
     assert.equal(cliInvocation(command), true, command);
   }
-  for (const command of ['rg codegraph src', 'ls .codegraph', 'which codegraph']) {
+  for (const command of ['rg codegraph src', 'ls .codegraph', 'which codegraph',
+    'rg "node /tmp/codegraph.js" src', 'grep "npx codegraph" README.md']) {
     assert.equal(cliInvocation(command), false, command);
   }
   const shell = { id: 's1', type: 'command_execution', command: 'node /tmp/codegraph.js explore q',

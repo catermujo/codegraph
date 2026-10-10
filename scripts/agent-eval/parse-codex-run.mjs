@@ -8,7 +8,7 @@ import { computeAllocation } from './parse-run.mjs';
 export const cliInvocation = (command) => {
   command = command.replace(/\b(?:\/\S*\/)?(?:bash|zsh|sh)\s+-[lc]+\s+["']/g, ';');
   return /(?:^|[;&|(`])\s*(?:[\w]+=[^\s]+\s+)*(?:["']?[\w./~-]*codegraph(?:\.js)?["']?)(?:\s|$)/i.test(command)
-  || /\b(?:node|npx|npm\s+exec)\s+(?:[^;&|\n]*\s)?["']?[^\s;]*codegraph(?:\.js)?["']?(?:\s|$)/i.test(command);
+  || /(?:^|[;&|(`])\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:node|npx|npm\s+exec)\s+(?:[^;&|\n]*\s)?["']?[^\s;]*codegraph(?:\.js)?["']?(?:\s|$)/i.test(command);
 };
 const shellKind = (command) => /\b(?:rg|grep|find|ls)\b/.test(command) ? 'search'
   : /\b(?:cat|sed|head|tail|less|more)\b/.test(command) ? 'read' : 'other';
