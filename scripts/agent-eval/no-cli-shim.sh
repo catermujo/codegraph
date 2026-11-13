@@ -70,7 +70,7 @@ cg_no_cli_setup() {
     PATH="$ARM_PATH" command -v "$e" >/dev/null || { echo "sanitized PATH lost '$e' — refusing to run"; return 1; }
   done
 
-  # DUMBAI: Codex rejects CLI attempts from its event log instead of using a Claude hook.
+  # Codex rejects CLI attempts from its event log instead of using a Claude hook.
   if [ "${CG_EVAL_AGENT:-claude}" = codex ]; then
     return 0
   fi

@@ -321,7 +321,7 @@ const migrations: Migration[] = [
     version: 17,
     description: MONOREPO_TARGETS_MIGRATION,
     up: (db) => {
-      // DUMBAI: The previous fork used v10 for targets and skipped upstream's v10 synthesis migration.
+      // The previous fork used v10 for targets and skipped upstream's v10 synthesis migration.
       if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'synthesis_inputs'").get()) {
         migrations.find((migration) => migration.version === 10)!.up(db);
       }

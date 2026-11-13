@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DUMBAI: Compare committed CodeGraph builds on fresh copies of an indexed target.
+# Compare committed CodeGraph builds on fresh copies of an indexed target.
 # Each build uses a separate source export. Each trial gets a new index and a warm daemon.
 # The original engine and target remain unchanged.
 #
@@ -49,7 +49,7 @@ fi
 CHANGED=$(git -C "$ENGINE" diff --name-only "$BASE_REF" HEAD -- src 2>/dev/null)
 [ -n "$CHANGED" ] || { echo "no src/ changes between $BASE_REF and HEAD — nothing to A/B"; exit 1; }
 
-# DUMBAI: Separate the builds and runs so the baseline cannot change the engine source.
+# Separate the builds and runs so the baseline cannot change the engine source.
 [ ! -e "$OUT/engine-new" ] && [ ! -e "$OUT/engine-baseline" ] || {
   echo "output already contains build snapshots: choose a fresh AGENT_EVAL_OUT"; exit 1
 }
@@ -80,7 +80,7 @@ build_snapshot baseline "$BASE_REF"
 node -e 'require("fs").writeFileSync(process.argv[1],JSON.stringify({agent:process.argv[2],new:process.argv[3],baseline:process.argv[4],target:process.argv[5],task:process.argv[6]},null,2))' \
   "$OUT/manifest.json" "$AGENT" "$(git -C "$ENGINE" rev-parse HEAD)" "$(git -C "$ENGINE" rev-parse "$BASE_REF")" "$TARGET" "$TASK"
 
-# DUMBAI: Preserve required tools while removing the shared CLI from the agent PATH.
+# Preserve required tools while removing the shared CLI from the agent PATH.
 . "$HARNESS/no-cli-shim.sh"
 CG_EVAL_AGENT="$AGENT" cg_no_cli_setup "$OUT" || exit 1
 

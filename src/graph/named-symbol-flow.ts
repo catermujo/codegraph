@@ -193,7 +193,7 @@ export interface FlowChain {
 }
 
 export interface NamedSymbolFlowOptions {
-  /** DUMBAI: Restrict token resolution and flow traversal to the selected build target. */
+  /** Restrict token resolution and flow traversal to the selected build target. */
   allowedFiles?: ReadonlySet<string>;
   blockedSymbols?: ReadonlySet<string>;
   exactCandidates?: ReadonlyMap<string, readonly Node[]>;

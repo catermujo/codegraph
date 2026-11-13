@@ -547,7 +547,7 @@ export interface SearchOptions {
   /** Include files from resolved transitive build.toml dependencies */
   includeDeps?: boolean;
 
-  /** DUMBAI: Internal exact-file gate; undefined is unrestricted, while [] matches nothing. */
+  /** Internal exact-file gate; undefined is unrestricted, while [] matches nothing. */
   allowedFilePaths?: readonly string[];
 }
 
@@ -811,6 +811,6 @@ export interface FindRelevantContextOptions {
   /** Include files from resolved transitive build.toml dependencies */
   includeDeps?: boolean;
 
-  /** DUMBAI: Internal exact-file gate; undefined is unrestricted, while [] matches nothing. */
+  /** Internal exact-file gate; undefined is unrestricted, while [] matches nothing. */
   allowedFilePaths?: readonly string[];
 }

@@ -107,7 +107,7 @@ export interface BoundaryContinuations {
 }
 
 export interface BoundaryScanOptions {
-  /** DUMBAI: Apply build-target scope before shortlist caps consume out-of-target candidates. */
+  /** Apply build-target scope before shortlist caps consume out-of-target candidates. */
   allowedFiles?: ReadonlySet<string>;
   /** Dispatch sites returned in total. Default {@link MAX_BOUNDARY_SITES}. */
   maxSites?: number;

@@ -607,7 +607,7 @@ export class ContextBuilder {
         ...extractSearchTerms(anchor.raw, { stems: false }),
       ]),
     );
-    // DUMBAI: Segment-vocab names are residual-query evidence, not exact-anchor
+    // Segment-vocab names are residual-query evidence, not exact-anchor
     // evidence. Keep relatives such as SmallManyExtra from re-entering through
     // that channel while preserving independently supplied seed names.
     const requiredSeedPrefixes = requiredAnchors
@@ -623,7 +623,7 @@ export class ContextBuilder {
     const residualSymbols = symbolsFromQuery.filter((symbol) => !anchoredTerms.has(symbol.toLowerCase()));
     const residualSeedNames = opts.seedNames.filter((name) =>
       !blockedTerms.has(name.toLowerCase()) && !isExactAnchorRelative(name));
-    // DUMBAI: Lower-leading camel tokens are also commonly object fields. When
+    // Lower-leading camel tokens are also commonly object fields. When
     // their exact lookup is zero, retain only the existing camel-infix recovery
     // (never a prefix match), while PascalCase/snake/qualified anchors stay
     // fail-closed and exact-family relatives remain excluded.

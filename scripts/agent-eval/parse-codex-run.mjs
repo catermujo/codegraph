@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { computeAllocation } from './parse-run.mjs';
 
-// DUMBAI: Detect invocations, including node wrappers, without treating a search for codegraph as retrieval.
+// Detect invocations, including node wrappers, without treating a search for codegraph as retrieval.
 export const cliInvocation = (command) => {
   command = command.replace(/\b(?:\/\S*\/)?(?:bash|zsh|sh)\s+-[lc]+\s+["']/g, ';');
   return /(?:^|[;&|(`])\s*(?:[\w]+=[^\s]+\s+)*(?:["']?[\w./~-]*codegraph(?:\.js)?["']?)(?:\s|$)/i.test(command)

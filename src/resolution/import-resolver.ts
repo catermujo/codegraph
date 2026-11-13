@@ -1454,7 +1454,7 @@ function resolveOdinReference(
       : null;
   }
 
-  // DUMBAI: The Odin grammar exposes member calls as `member_expression(receiver,
+  // The Odin grammar exposes member calls as `member_expression(receiver,
   // call_expression(function))`. The extractor preserves that receiver in the
   // reference name, so a bare call cannot be safely assigned to an import.
   if (!importMapping) return null;
@@ -3443,7 +3443,7 @@ export function resolveViaImport(
   if ((!ref.language || !ref.filePath) && context.getNodeById) {
     const fromNode = context.getNodeById(ref.fromNodeId);
     if (fromNode?.language === 'odin') {
-      // DUMBAI: Odin calls use the shared bare-call walker, which omits these fields.
+      // Odin calls use the shared bare-call walker, which omits these fields.
       ref = { ...ref, language: 'odin', filePath: fromNode.filePath };
     }
   }

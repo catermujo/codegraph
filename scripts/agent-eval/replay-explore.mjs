@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// DUMBAI: Replay literal queries, never execute commands from a transcript.
+// Replay literal queries, never execute commands from a transcript.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -36,7 +36,7 @@ function literal(node) {
 function shellQueries(command) {
   const queries = [];
   for (const match of command.matchAll(/\bcodegraph\s+explore\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")([^\n;|&]*)/g)) {
-    // DUMBAI: Double-quoted shell expansions need a shell and cannot be replayed as literals.
+    // Double-quoted shell expansions need a shell and cannot be replayed as literals.
     if (match[2] !== undefined && /[$`]/.test(match[2])) continue;
     const args = { query: match[1] ?? match[2].replace(/\\(["\\])/g, '$1') };
     const tokens = match[3].match(/"[^"\n]*"|'[^'\n]*'|[^\s]+/g) ?? [];

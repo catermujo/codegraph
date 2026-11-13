@@ -2975,7 +2975,7 @@ export class ToolHandler {
 
   /** Refresh named files before resolving or slicing their indexed symbols. */
   private async refreshExploreAnchors(cg: CodeGraph, args: Record<string, unknown>): Promise<void> {
-    // DUMBAI: Query workers are readers. Only the owning writer repairs the cache before dispatch.
+    // Query workers are readers. Only the owning writer repairs the cache before dispatch.
     if (cg.isReadOnly?.() !== false || cg.isWatcherDegraded?.()) return;
     const query = this.validateString(args.query, 'query');
     if (typeof query !== 'string') return;
@@ -3015,7 +3015,7 @@ export class ToolHandler {
         && (scopeFiles === undefined || scopeFiles.has(file))
         && (scope === undefined || scope.exactFiles.includes(file)
           || scope.directoryPrefixes.some(prefix => file === prefix || file.startsWith(`${prefix}/`))));
-      // DUMBAI: Broad or ambiguous families must not turn a read into a repository-wide sync.
+      // Broad or ambiguous families must not turn a read into a repository-wide sync.
       if (new Set([...candidates, ...files]).size > MAX_FILES) continue;
       for (const file of files) candidates.add(file);
     }
@@ -3034,7 +3034,7 @@ export class ToolHandler {
     try {
       await cg.sync({ paths: stale });
     } catch (error) {
-      // DUMBAI: A busy or failed writer leaves the existing stale-source guard in force.
+      // A busy or failed writer leaves the existing stale-source guard in force.
       process.stderr.write(`[CodeGraph MCP] Anchor refresh failed: ${error instanceof Error ? error.message : String(error)}\n`);
     }
     this.driftCache.clear();
@@ -4693,7 +4693,7 @@ export class ToolHandler {
               : indexedScopeFiles.filter((filePath) => scoped.has(filePath));
           }
         }
-        // DUMBAI: A dotted path token can name an existing auxiliary file that
+        // A dotted path token can name an existing auxiliary file that
         // is absent from the source index. Check only query-shaped candidates
         // under the validated root; never scan the project or ingest content.
         const indexedLower = new Set(indexedRepoFiles.map((filePath) => filePath.toLowerCase()));
@@ -4868,7 +4868,7 @@ export class ToolHandler {
       allowedFilePaths,
     });
 
-    // DUMBAI: Required exact families may be present in the context pool because the
+    // Required exact families may be present in the context pool because the
     // context budget is larger than Explore's file budget. Keep only complete,
     // bounded families as named seeds; oversized families remain metadata-only.
     const requiredSymbolCandidates = new Map<string, readonly Node[]>();

@@ -13,7 +13,7 @@ export function loadExploreContext(root: string, conversationId: string, context
   const key = createHash('sha256').update(identity!).digest('hex');
   const directory = path.join(root, '.codegraph', 'explore-context');
   const filename = path.join(directory, `${key}.json`);
-  // DUMBAI: Context files contain source fingerprints and ranges only. A damaged cache re-serves source.
+  // Context files contain source fingerprints and ranges only. A damaged cache re-serves source.
   try {
     if (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw new Error('Unsafe context directory');
     if (!fs.lstatSync(filename).isFile() || fs.lstatSync(filename).isSymbolicLink()) throw new Error('Unsafe context file');
@@ -39,7 +39,7 @@ export function loadExploreContext(root: string, conversationId: string, context
       const temporary = path.join(directory, `${key}.${randomUUID()}.tmp`);
       try {
         fs.writeFileSync(temporary, JSON.stringify(state.view()), { flag: 'wx', mode: 0o600 });
-        // DUMBAI: Concurrent calls may lose recall when the last snapshot wins; they cannot invent held source.
+        // Concurrent calls may lose recall when the last snapshot wins; they cannot invent held source.
         fs.renameSync(temporary, filename);
       } finally {
         fs.rmSync(temporary, { force: true });
