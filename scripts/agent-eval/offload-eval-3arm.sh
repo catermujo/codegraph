@@ -29,7 +29,7 @@ TARGET=$(cd "$TARGET" && pwd -P)
 prewarm() { # path  extra-env (e.g. "FOO=bar")
   pkill -9 -f "serve --mcp --path $1" 2>/dev/null; rm -f "$1/.codegraph/daemon.sock" 2>/dev/null; sleep 0.6
   env ${2:-} CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS=1800000 node "$BIN" serve --mcp --path "$1" </dev/null >/dev/null 2>&1 &
-  node -e 'const fs=require("fs");let n=0;const t=setInterval(()=>{if(fs.existsSync(process.argv[1]+"/.codegraph/daemon.sock")){clearInterval(t);process.exit(0)}if(n++>150){clearInterval(t);process.exit(1)}},100)' "$1" \
+  node "$HERE/wait-daemon.mjs" "$1" "$BIN" \
     && echo "  daemon warm" || echo "  WARN daemon never bound"
 }
 

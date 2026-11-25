@@ -31,7 +31,7 @@ fi
 pkill -9 -f "serve --mcp --path $TARGET" 2>/dev/null; rm -f "$TARGET/.codegraph/daemon.sock" 2>/dev/null; sleep 0.6
 env $DAEMON_ENV CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS=1800000 \
   node "$BIN" serve --mcp --path "$TARGET" </dev/null >/dev/null 2>&1 &
-node -e 'const fs=require("fs");let n=0;const t=setInterval(()=>{if(fs.existsSync(process.argv[1]+"/.codegraph/daemon.sock")){clearInterval(t);process.exit(0)}if(n++>150){clearInterval(t);process.exit(1)}},100)' "$TARGET" \
+node "$HERE/wait-daemon.mjs" "$TARGET" "$BIN" \
   && echo "daemon warm ($STYLE)" || echo "WARN daemon never bound"
 
 tag="$REPO-$STYLE-$N"

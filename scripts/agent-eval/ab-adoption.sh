@@ -35,7 +35,7 @@ echo "###### task=$TASK"; echo
 prewarm() {
   pkill -9 -f "serve --mcp --path $1" 2>/dev/null
   CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS=1800000 node "$BIN" serve --mcp --path "$1" </dev/null >/dev/null 2>&1 &
-  node -e 'const fs=require("fs");let n=0;const t=setInterval(()=>{if(fs.existsSync(process.argv[1]+"/.codegraph/daemon.sock")){clearInterval(t);process.exit(0)}if(n++>150){clearInterval(t);process.exit(1)}},100)' "$1" >/dev/null 2>&1
+  node "$ENGINE/scripts/agent-eval/wait-daemon.mjs" "$1" "$BIN" >/dev/null 2>&1
 }
 
 # Per-run tool-choice counts: Read vs codegraph_node[file] vs [symbol].

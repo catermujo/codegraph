@@ -53,7 +53,7 @@ jq -n --arg cmd "bash $HOOK" \
 prewarm() { # target — spawn a persistent daemon and wait for its socket
   pkill -9 -f "serve --mcp --path $1" 2>/dev/null
   CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS=1800000 node "$BIN" serve --mcp --path "$1" </dev/null >/dev/null 2>&1 &
-  node -e 'const fs=require("fs");let n=0;const t=setInterval(()=>{if(fs.existsSync(process.argv[1]+"/.codegraph/daemon.sock")){clearInterval(t);process.exit(0)}if(n++>150){clearInterval(t);process.exit(1)}},100)' "$1" \
+  node "$ENGINE/scripts/agent-eval/wait-daemon.mjs" "$1" "$BIN" \
     && echo "  daemon warm: $1" || echo "  WARN: daemon never bound for $1"
 }
 
