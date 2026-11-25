@@ -93,7 +93,8 @@ echo
 prewarm() {
   DAEMON_TARGETS+=("$1")
   CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS=1800000 node "$BIN" serve --mcp --path "$1" </dev/null >/dev/null 2>&1 &
-  node -e 'const fs=require("fs");let n=0;const t=setInterval(()=>{if(fs.existsSync(process.argv[1]+"/.codegraph/daemon.sock")){clearInterval(t);process.exit(0)}if(n++>150){clearInterval(t);process.exit(1)}},100)' "$1"
+  # Ask the arm's build where its daemon binds: a long target path moves the socket to the temp dir.
+  node -e 'const fs=require("fs");const paths=require(process.argv[2]).getDaemonSocketCandidates(process.argv[1]);let n=0;const t=setInterval(()=>{if(paths.some((p)=>fs.existsSync(p))){clearInterval(t);process.exit(0)}if(n++>150){clearInterval(t);process.exit(1)}},100)' "$1" "$(dirname "$BIN")/../mcp/daemon-paths.js"
   echo "  daemon warm: $1"
 }
 
